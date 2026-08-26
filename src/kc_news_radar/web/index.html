@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Kansas City News Radar</title>
+  <link rel="stylesheet" href="/web/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar__inner">
+      <div class="brand">
+        <div class="brand__title">KANSAS CITY NEWS RADAR</div>
+        <div class="brand__subtitle">Experimental early-warning system for local journalism</div>
+      </div>
+      <div class="brand__meta" id="topMeta"></div>
+    </div>
+    <div id="demoBanner" class="demo-banner" hidden>DEMO DATA — synthetic fixtures for demonstration only.</div>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button class="tab tab--active" data-tab="brief">Morning Brief</button>
+    <button class="tab" data-tab="emerging">Emerging Signals</button>
+    <button class="tab" data-tab="next72">Next 72h</button>
+    <button class="tab" data-tab="ledger">Forecast Ledger</button>
+    <button class="tab" data-tab="sources">Source Health</button>
+  </nav>
+
+  <main class="content">
+    <!-- MORNING BRIEF -->
+    <section id="brief" class="panel panel--active">
+      <div class="panel__header">
+        <h1>Morning Strategy Brief</h1>
+        <div class="panel__meta" id="briefMeta"></div>
+      </div>
+      <p class="scientific-note" id="briefNote"></p>
+
+      <h2>Top priorities</h2>
+      <div id="topPriorities" class="cards"></div>
+
+      <div class="grid-3">
+        <div>
+          <h2>New</h2>
+          <div id="briefNew" class="cards"></div>
+        </div>
+        <div>
+          <h2>Changed</h2>
+          <div id="briefChanged" class="cards"></div>
+        </div>
+        <div>
+          <h2>Resolved</h2>
+          <div id="briefResolved" class="cards"></div>
+        </div>
+      </div>
+
+      <h2>Watch (below assignment threshold)</h2>
+      <div id="briefWatch" class="cards"></div>
+
+      <h2>Beat momentum</h2>
+      <table class="table">
+        <thead><tr><th>Beat</th><th>Momentum</th><th>Editorial relevance</th><th>Next catalyst</th></tr></thead>
+        <tbody id="briefBeatMomentum"></tbody>
+      </table>
+
+      <h2>Questions worth discussing</h2>
+      <ol id="briefQuestions" class="questions"></ol>
+
+      <p class="disclaimer" id="briefDisclaimer"></p>
+    </section>
+
+    <!-- EMERGING SIGNALS -->
+    <section id="emerging" class="panel">
+      <div class="panel__header"><h1>Emerging signals</h1></div>
+      <p>Signals below the forecast threshold that may still warrant a scan.</p>
+      <div id="emergingList" class="cards"></div>
+    </section>
+
+    <!-- NEXT 72H -->
+    <section id="next72" class="panel">
+      <div class="panel__header"><h1>Scheduled catalysts in the next 72 hours</h1></div>
+      <table class="table">
+        <thead><tr><th>When</th><th>Event</th><th>Beat</th><th>Geography</th><th>Source</th></tr></thead>
+        <tbody id="next72Body"></tbody>
+      </table>
+    </section>
+
+    <!-- LEDGER -->
+    <section id="ledger" class="panel">
+      <div class="panel__header"><h1>Forecast ledger</h1></div>
+      <p class="scientific-note">Experimental scores — not calibrated probabilities. Every issued forecast is preserved; misses remain visible.</p>
+      <table class="table">
+        <thead>
+          <tr><th>Issued</th><th>Claim</th><th>Score</th><th>Relevance</th><th>Priority</th><th>Window</th><th>Status</th><th>Outcome</th><th>Versions</th></tr>
+        </thead>
+        <tbody id="ledgerBody"></tbody>
+      </table>
+    </section>
+
+    <!-- SOURCE HEALTH -->
+    <section id="sources" class="panel">
+      <div class="panel__header"><h1>Source health</h1></div>
+      <p>Radar reflects only currently configured and successfully collected public sources.</p>
+      <table class="table">
+        <thead><tr><th>Source</th><th>Status</th><th>Last attempt</th><th>Last success</th><th>Items</th><th>Latency</th><th>Note</th></tr></thead>
+        <tbody id="sourcesBody"></tbody>
+      </table>
+    </section>
+  </main>
+
+  <script src="/web/app.js"></script>
+</body>
+</html>

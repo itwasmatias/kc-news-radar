@@ -1,0 +1,66 @@
+{
+  "page": 1,
+  "results_per_page": 20,
+  "results_size": 3,
+  "total_results_size": 3,
+  "total_pages": 1,
+  "next_page": null,
+  "prev_page": null,
+  "results": [
+    {
+      "id": "ahdZyBEAACwAm2Nq",
+      "uid": "world-cup-2026",
+      "type": "general_content_page",
+      "href": "https://flykc.cdn.prismic.io/api/v2/documents/search?ref=aoxYHxEAACoA1vvC&q=%5B%5Bat%28document.id%2C+%22ahdZyBEAACwAm2Nq%22%29%5D%5D",
+      "tags": [],
+      "first_publication_date": "2026-05-27T20:53:37+0000",
+      "last_publication_date": "2026-06-16T20:57:11+0000",
+      "slugs": ["world-cup-2026"],
+      "linked_documents": [],
+      "lang": "en-us",
+      "alternate_languages": [],
+      "data": {
+        "blue_hero_banner_title": "2026 FIFA World Cup\u2122",
+        "meta_title": null,
+        "meta_description": "Kansas City International Airport (MCI) is preparing for the 2026 FIFA World Cup.",
+        "body": []
+      }
+    },
+    {
+      "id": "ZiA3iREAAEIRJ-1K",
+      "uid": "new-terminal-project-awards",
+      "type": "general_content_page",
+      "href": "https://flykc.cdn.prismic.io/api/v2/documents/search?ref=aoxYHxEAACoA1vvC&q=%5B%5Bat%28document.id%2C+%22ZiA3iREAAEIRJ-1K%22%29%5D%5D",
+      "tags": [],
+      "first_publication_date": "2024-04-17T20:59:13+0000",
+      "last_publication_date": "2026-06-25T20:25:07+0000",
+      "slugs": ["new-terminal-project-awards"],
+      "linked_documents": [],
+      "lang": "en-us",
+      "alternate_languages": [],
+      "data": {
+        "blue_hero_banner_title": [
+          {"type": "heading1", "text": "New Terminal Project Awards", "spans": []}
+        ],
+        "meta_title": "MCI New Terminal Awards",
+        "meta_description": "Discover the accolades and recognitions MCI's new terminal project has received for design and innovation.",
+        "body": []
+      }
+    },
+    {
+      "id": "ZeVjkxAAAB4A_zz9",
+      "uid": null,
+      "type": "general_content_page",
+      "first_publication_date": "2023-01-15T14:00:00+0000",
+      "last_publication_date": "2023-01-15T14:00:00+0000",
+      "slugs": [],
+      "data": {
+        "blue_hero_banner_title": "Draft page — missing uid",
+        "meta_description": null,
+        "body": []
+      }
+    }
+  ],
+  "version": "482083b",
+  "license": "All Rights Reserved"
+}

@@ -1,0 +1,32 @@
+[
+  {
+    "MatterId": 50892,
+    "MatterGuid": "9805D51E-C5C2-4E82-A9BF-ACEE4F9559E8",
+    "MatterLastModifiedUtc": "2026-08-26T20:10:53.69",
+    "MatterFile": "260718",
+    "MatterName": null,
+    "MatterTitle": "Sponsor: City Manager\u2019s Office\r\n\r\nEstimating revenue in the amount of $51,571,000.00 in the Taxable Special Obligation Series 2027A Project Fund, Fund No. 3458, and appropriating the same to the Roy Blunt Luminary Park Project.",
+    "MatterTypeName": "Ordinance",
+    "MatterStatusName": "Agenda Ready",
+    "MatterBodyName": "Finance, Governance and Public Safety Committee",
+    "MatterIntroDate": "2026-08-10T00:00:00",
+    "MatterAgendaDate": "2026-09-01T00:00:00",
+    "MatterPassedDate": null,
+    "MatterEnactmentDate": null
+  },
+  {
+    "MatterId": 27318,
+    "MatterGuid": "99B0CD39-30E1-45F5-BB7A-7C61078C9D29",
+    "MatterLastModifiedUtc": "2005-11-01T12:00:00",
+    "MatterFile": "050992",
+    "MatterName": null,
+    "MatterTitle": "Calling for submission to the voters of Kansas City, at a special election to be held.",
+    "MatterTypeName": "Ordinance",
+    "MatterStatusName": "Historical",
+    "MatterBodyName": "Director of Housing and Community Development",
+    "MatterIntroDate": "2005-09-08T00:00:00",
+    "MatterAgendaDate": "2005-10-19T00:00:00",
+    "MatterPassedDate": "2005-10-27T00:00:00",
+    "MatterEnactmentDate": "2005-10-27T00:00:00"
+  }
+]

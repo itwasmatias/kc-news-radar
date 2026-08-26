@@ -1,0 +1,42 @@
+[
+  {
+    "MatterId": 19293,
+    "MatterGuid": "158B4A27-3B14-404B-8842-B2B9E706D2FF",
+    "MatterLastModifiedUtc": "2026-08-26T18:41:47.057",
+    "MatterFile": "22204",
+    "MatterName": "Outside Agency 3mil",
+    "MatterTitle": "A RESOLUTION authorizing the County Executive to execute Cooperative Agreements with certain outside agencies that provide public health related and other public services to citizens of Jackson County, at an aggregate cost to the County not to exceed $2,905,000.00.",
+    "MatterTypeId": 3,
+    "MatterTypeName": "Resolution",
+    "MatterStatusId": 19,
+    "MatterStatusName": "Passed",
+    "MatterBodyId": 24,
+    "MatterBodyName": "Budget Committee",
+    "MatterIntroDate": "2026-03-06T00:00:00",
+    "MatterAgendaDate": "2026-03-09T00:00:00",
+    "MatterPassedDate": "2026-03-23T00:00:00",
+    "MatterEnactmentDate": null,
+    "MatterEnactmentNumber": null,
+    "MatterCost": 3000000.0000,
+    "MatterRestrictViewViaWeb": false
+  },
+  {
+    "MatterId": 8254,
+    "MatterGuid": "A5777BFD-E6D6-4284-AE10-14077CBF783F",
+    "MatterLastModifiedUtc": "2026-08-26T14:08:08.987",
+    "MatterFile": "16127",
+    "MatterName": null,
+    "MatterTitle": "A RESOLUTION appointing Henry Rizzo to the Kansas and Missouri Metropolitan Culture Commission.",
+    "MatterTypeName": "Resolution",
+    "MatterStatusName": "Passed",
+    "MatterBodyName": "County Legislature",
+    "MatterIntroDate": "2007-01-08T00:00:00",
+    "MatterAgendaDate": "2007-01-08T00:00:00",
+    "MatterPassedDate": "2007-01-15T00:00:00",
+    "MatterEnactmentDate": null
+  },
+  {
+    "MatterId": null,
+    "MatterTitle": "malformed row without an id — parser must skip"
+  }
+]
