@@ -25,6 +25,8 @@ MAX_EXCERPT_CHARS = 800
 DEFAULT_COLLECTION_CADENCE_SECONDS = 15 * 60
 DEFAULT_STALE_AFTER_SECONDS = 60 * 60
 DEFAULT_COLLECTION_LEASE_SECONDS = 30 * 60
+DEFAULT_SHUTDOWN_GRACE_SECONDS = 30
+DEFAULT_BACKUP_RETENTION_COUNT = 14
 
 
 def _bool_env(key: str, default: bool = False) -> bool:
@@ -72,13 +74,23 @@ class Settings:
     collection_cadence_seconds: int
     stale_after_seconds: int
     collection_lease_seconds: int
+    shutdown_grace_seconds: int
+    backup_dir: Path
+    backup_retention_count: int
 
 
 def load_settings() -> Settings:
     configured_db = os.environ.get("KC_NEWS_RADAR_DB")
     db_path = Path(configured_db) if configured_db else DEFAULT_DB_PATH
+    resolved_db_path = db_path.resolve()
+    configured_backup_dir = os.environ.get("KC_NEWS_RADAR_BACKUP_DIR")
+    backup_dir = (
+        Path(configured_backup_dir).resolve()
+        if configured_backup_dir
+        else resolved_db_path.parent / "backups"
+    )
     return Settings(
-        db_path=db_path.resolve(),
+        db_path=resolved_db_path,
         db_path_explicit=configured_db is not None,
         demo_mode=_bool_env("KC_NEWS_RADAR_DEMO", False),
         host=os.environ.get("KC_NEWS_RADAR_HOST", "127.0.0.1"),
@@ -103,5 +115,18 @@ def load_settings() -> Settings:
             DEFAULT_COLLECTION_LEASE_SECONDS,
             minimum=60,
             maximum=86_400,
+        ),
+        shutdown_grace_seconds=_bounded_int_env(
+            "KC_NEWS_RADAR_SHUTDOWN_GRACE_SECONDS",
+            DEFAULT_SHUTDOWN_GRACE_SECONDS,
+            minimum=1,
+            maximum=300,
+        ),
+        backup_dir=backup_dir,
+        backup_retention_count=_bounded_int_env(
+            "KC_NEWS_RADAR_BACKUP_RETENTION_COUNT",
+            DEFAULT_BACKUP_RETENTION_COUNT,
+            minimum=1,
+            maximum=10_000,
         ),
     )

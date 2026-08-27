@@ -42,6 +42,7 @@ from .config import load_settings
 from .ledger.resolution import forecast_status_after_now
 from .ledger.resolution import record_resolution
 from .models import Outcome
+from .operations import build_operator_health
 from .performance import build_performance_summary
 from .freshness import build_collection_status
 from .pipeline.briefing import build_brief
@@ -166,8 +167,11 @@ def api_health() -> dict[str, Any]:
         contains_demo_data = bool(conn.execute(
             "SELECT 1 FROM source_items WHERE title LIKE '[DEMO DATA]%' LIMIT 1"
         ).fetchone())
+    operational = build_operator_health(settings, process_alive=True)
     return {
-        "ok": True,
+        "ok": operational["healthy"],
+        "process_alive": True,
+        "operational_healthy": operational["healthy"],
         "version": __version__,
         "scoring_model_version": SCORING_MODEL_VERSION,
         "demo_mode": settings.demo_mode or contains_demo_data,
@@ -175,6 +179,7 @@ def api_health() -> dict[str, Any]:
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "counts": counts,
         "database": _database_context(health_rows),
+        "operations": operational,
         "scientific_note": "Experimental scores are not calibrated probabilities.",
     }
 
@@ -320,7 +325,9 @@ def api_performance() -> dict[str, Any]:
 def api_collection_status() -> dict[str, Any]:
     settings = load_settings()
     with _conn() as conn:
-        return build_collection_status(conn, settings=settings)
+        status = build_collection_status(conn, settings=settings)
+    status["process_alive"] = True
+    return status
 
 
 @app.get("/api/collection/runs")

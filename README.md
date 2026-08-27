@@ -95,6 +95,9 @@ Environment variables (all optional):
 | `KC_NEWS_RADAR_COLLECTION_CADENCE_SECONDS` | `900`            | Seconds between completed cycles (30–86400) |
 | `KC_NEWS_RADAR_STALE_AFTER_SECONDS` | `3600`                 | Age at which completed run evidence is stale (60–604800) |
 | `KC_NEWS_RADAR_COLLECTION_LEASE_SECONDS` | `1800`             | Cross-process lease expiry (60–86400) |
+| `KC_NEWS_RADAR_SHUTDOWN_GRACE_SECONDS` | `30`                 | Graceful scheduler stop wait (1–300) |
+| `KC_NEWS_RADAR_BACKUP_DIR`   | DB directory + `/backups`         | Verified SQLite backup directory      |
+| `KC_NEWS_RADAR_BACKUP_RETENTION_COUNT` | `14`               | Successful Radar backups retained (1–10000) |
 
 The database file is created on first use. Reopening it later preserves every
 source item, signal, forecast version, evidence snapshot, resolution, and
@@ -130,6 +133,10 @@ worker state, last attempt/completion/success, evidence age, next scheduled
 cycle, recent immutable run history, and per-source failure evidence. See
 `docs/AUTOMATIC_COLLECTION.md` for locking and recovery semantics.
 
+For the supported Fedora user service, truthful health command, SQLite-safe
+backup/retention, restore procedure, and crash/reboot handling, follow
+`docs/PILOT_RUNBOOK.md`.
+
 ## Closed-loop editorial validation
 
 Open **Forecast Ledger** and select a forecast claim. The detail workspace
@@ -162,6 +169,7 @@ sample insufficient for stable interpretation. See
 - `docs/DEMO.md` — running the demo without network access
 - `docs/VALIDATION_WORKFLOW.md` — evidence, feedback, outcomes, and performance
 - `docs/AUTOMATIC_COLLECTION.md` — scheduler, run history, overlap, and recovery
+- `docs/PILOT_RUNBOOK.md` — Fedora user service, health, backup, restore, and crash recovery
 
 ---
 

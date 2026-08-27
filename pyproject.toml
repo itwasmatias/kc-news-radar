@@ -30,6 +30,7 @@ dev = [
 kc-news-radar-collect = "kc_news_radar.collect:main"
 kc-news-radar-serve = "kc_news_radar.app:serve"
 kc-news-radar-run = "kc_news_radar.scheduler:run_service"
+kc-news-radar-operations = "kc_news_radar.operations:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

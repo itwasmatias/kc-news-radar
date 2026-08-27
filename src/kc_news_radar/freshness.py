@@ -31,6 +31,7 @@ def build_collection_status(
     runs = dbmod.list_collection_runs(conn, limit=200)
     lease = dbmod.current_collection_lease(conn, now=now)
     scheduler = dbmod.get_scheduler_state(conn)
+    startup_recovery = dbmod.latest_startup_recovery(conn)
 
     started = [run for run in runs if run.get("started_at")]
     finished = [
@@ -42,6 +43,7 @@ def build_collection_status(
         if run["state"] in {"COMPLETED", "PARTIAL_FAILURE"}
     ]
     successful = [run for run in runs if run["state"] == "COMPLETED"]
+    abandoned = [run for run in runs if run["state"] == "ABANDONED"]
     latest_finished = finished[0] if finished else None
     latest_evidence_run = evidence_runs[0] if evidence_runs else None
     evidence_at = latest_evidence_run.get("completed_at") if latest_evidence_run else None
@@ -112,7 +114,18 @@ def build_collection_status(
     if runs and runs[0]["state"] == "RUNNING" and not (lease and lease["active"]):
         warnings.append("An incomplete run has no active lease and requires startup recovery evidence.")
 
+    active_lease = None
+    current_run = None
+    if lease and lease["active"]:
+        active_lease = {
+            key: value for key, value in lease.items()
+            if key not in {"owner_token", "singleton_id"}
+        }
+        current_run = dbmod.get_collection_run(conn, lease["run_id"])
+
     return {
+        "database_path": str(settings.db_path),
+        "database_selection": "explicit" if settings.db_path_explicit else "default",
         "automatic_collection_enabled": settings.collection_enabled,
         "worker_state": scheduler_projection["worker_state"],
         "worker_responsive": worker_responsive,
@@ -125,12 +138,20 @@ def build_collection_status(
         "scheduler_heartbeat_at": scheduler_projection.get("heartbeat_at"),
         "collection_running": bool(lease and lease["active"]),
         "active_run_id": lease["run_id"] if lease and lease["active"] else None,
+        "active_lease": active_lease,
+        "current_run": current_run,
+        "latest_run_state": runs[0]["state"] if runs else None,
+        "last_attempted_run": runs[0] if runs else None,
         "last_requested_at": runs[0]["requested_at"] if runs else None,
         "last_attempt_started_at": started[0]["started_at"] if started else None,
         "last_completed_at": latest_finished.get("completed_at") if latest_finished else None,
         "last_completed_run_id": latest_finished["run_id"] if latest_finished else None,
+        "last_completed_run": latest_finished,
         "last_successful_at": successful[0].get("completed_at") if successful else None,
         "last_successful_run_id": successful[0]["run_id"] if successful else None,
+        "last_successful_run": successful[0] if successful else None,
+        "latest_abandoned_run": abandoned[0] if abandoned else None,
+        "startup_recovery": startup_recovery,
         "evidence_at": evidence_at,
         "evidence_age_hours": evidence_age_hours,
         "freshness_state": freshness_state,

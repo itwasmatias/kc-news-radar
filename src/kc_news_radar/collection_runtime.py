@@ -132,6 +132,11 @@ def execute_collection_cycle(
             lease_seconds=settings.collection_lease_seconds,
         )
     if not acquisition["acquired"]:
+        log.warning(
+            "collection cycle blocked by active run run_id=%s blocked_by=%s",
+            run_id,
+            acquisition["blocked_by_run_id"],
+        )
         return CollectionCycleResult(
             run_id=run_id,
             state=CollectionRunState.BLOCKED_OVERLAP,
@@ -149,6 +154,7 @@ def execute_collection_cycle(
     attempted = succeeded = failed = total_items = total_updated = 0
     pipeline_result: dict | None = None
     failures: list[str] = []
+    log.info("collection cycle begin run_id=%s trigger=%s", run_id, effective_trigger.value)
 
     try:
         with dbmod.connect(settings.db_path) as conn:
@@ -279,6 +285,21 @@ def execute_collection_cycle(
             failure_summary=failure_summary,
         )
 
+    if failures:
+        log.warning(
+            "collection cycle source failures run_id=%s failed=%s summary=%s",
+            run_id,
+            failed,
+            failure_summary,
+        )
+    log.info(
+        "collection cycle end run_id=%s state=%s sources=%s/%s items=%s",
+        run_id,
+        state.value,
+        succeeded,
+        attempted,
+        total_items,
+    )
     return CollectionCycleResult(
         run_id=run_id,
         state=state,

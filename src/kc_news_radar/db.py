@@ -249,6 +249,16 @@ CREATE TABLE IF NOT EXISTS scheduler_state (
     heartbeat_at TEXT NOT NULL,
     worker_id TEXT
 );
+
+-- Append-only startup checks. Recovered run IDs refer to immutable run
+-- history; an empty list is still useful evidence that recovery ran.
+CREATE TABLE IF NOT EXISTS startup_recoveries (
+    startup_id TEXT PRIMARY KEY,
+    checked_at TEXT NOT NULL,
+    recovered_run_ids_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_startup_recoveries_checked
+    ON startup_recoveries(checked_at DESC);
 """
 
 
@@ -1014,14 +1024,26 @@ def finish_collection_run(
 
 
 def recover_abandoned_collection_runs(
-    conn: sqlite3.Connection, *, now: datetime
+    conn: sqlite3.Connection,
+    *,
+    now: datetime,
+    invalid_owner_token_prefix: str | None = None,
 ) -> list[str]:
-    """Mark only runs whose lease is absent or expired as abandoned."""
+    """Mark runs whose lease is absent, expired, or has a proven-dead owner class."""
     conn.execute("BEGIN IMMEDIATE")
     recovered: list[str] = []
     try:
         lease = conn.execute("SELECT * FROM collection_lease WHERE singleton_id=1").fetchone()
-        lease_active = bool(lease and datetime.fromisoformat(lease["expires_at"]) > now)
+        lease_owner_invalid = bool(
+            lease
+            and invalid_owner_token_prefix
+            and str(lease["owner_token"]).startswith(invalid_owner_token_prefix)
+        )
+        lease_active = bool(
+            lease
+            and not lease_owner_invalid
+            and datetime.fromisoformat(lease["expires_at"]) > now
+        )
         rows = conn.execute(
             """
             SELECT r.run_id
@@ -1052,6 +1074,40 @@ def recover_abandoned_collection_runs(
     except Exception:
         conn.rollback()
         raise
+
+
+def record_startup_recovery(
+    conn: sqlite3.Connection,
+    *,
+    startup_id: str,
+    checked_at: datetime,
+    recovered_run_ids: list[str],
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO startup_recoveries (
+            startup_id, checked_at, recovered_run_ids_json
+        ) VALUES (?,?,?)
+        """,
+        (startup_id, _iso(checked_at), json.dumps(recovered_run_ids)),
+    )
+
+
+def latest_startup_recovery(conn: sqlite3.Connection) -> dict[str, Any] | None:
+    try:
+        row = conn.execute(
+            "SELECT * FROM startup_recoveries ORDER BY checked_at DESC, rowid DESC LIMIT 1"
+        ).fetchone()
+    except sqlite3.OperationalError as exc:
+        if "no such table: startup_recoveries" in str(exc):
+            return None
+        raise
+    if not row:
+        return None
+    result = dict(row)
+    result["recovered_run_ids"] = json.loads(result.pop("recovered_run_ids_json"))
+    result["recovered_count"] = len(result["recovered_run_ids"])
+    return result
 
 
 def _collection_run_row(row: sqlite3.Row) -> dict[str, Any]:
