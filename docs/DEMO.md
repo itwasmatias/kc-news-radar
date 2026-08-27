@@ -14,15 +14,21 @@ cannot be mistaken for a real public-source item.
 KC_NEWS_RADAR_DB=./data/demo.db KC_NEWS_RADAR_DEMO=1 kc-news-radar-collect
 
 # Start the dashboard.
-KC_NEWS_RADAR_DB=./data/demo.db kc-news-radar-serve
+KC_NEWS_RADAR_DB=./data/demo.db KC_NEWS_RADAR_DEMO=1 kc-news-radar-run
 # → open http://127.0.0.1:8765
 ```
 
 You'll see something like:
 
 ```
-DEMO MODE: loaded fixtures. 35 signals, 7 forecast versions.
+run <uuid>: COMPLETED; sources=10/10 succeeded, failed=0; items=16; updated=0
+pipeline: 35 signals, 7 forecast versions from 16 items
 ```
+
+With `kc-news-radar-run`, the first automatic cycle loads fixtures when the
+selected database is empty. Later scheduled demo cycles reuse only the marked
+synthetic records, refresh the deterministic pipeline, and append run history;
+they never contact live sources or mix real records into the demo database.
 
 ## What the demo exercises
 

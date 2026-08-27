@@ -22,6 +22,9 @@ USER_AGENT = (
 
 HTTP_TIMEOUT_SECONDS = 15.0
 MAX_EXCERPT_CHARS = 800
+DEFAULT_COLLECTION_CADENCE_SECONDS = 15 * 60
+DEFAULT_STALE_AFTER_SECONDS = 60 * 60
+DEFAULT_COLLECTION_LEASE_SECONDS = 30 * 60
 
 
 def _bool_env(key: str, default: bool = False) -> bool:
@@ -29,6 +32,31 @@ def _bool_env(key: str, default: bool = False) -> bool:
     if raw is None:
         return default
     return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _strict_bool_env(key: str, default: bool) -> bool:
+    raw = os.environ.get(key)
+    if raw is None:
+        return default
+    normalized = raw.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{key} must be one of 1/0, true/false, yes/no, or on/off")
+
+
+def _bounded_int_env(key: str, default: int, *, minimum: int, maximum: int) -> int:
+    raw = os.environ.get(key)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{key} must be an integer") from exc
+    if not minimum <= value <= maximum:
+        raise ValueError(f"{key} must be between {minimum} and {maximum}")
+    return value
 
 
 @dataclass(frozen=True)
@@ -40,6 +68,10 @@ class Settings:
     port: int
     user_agent: str
     http_timeout: float
+    collection_enabled: bool
+    collection_cadence_seconds: int
+    stale_after_seconds: int
+    collection_lease_seconds: int
 
 
 def load_settings() -> Settings:
@@ -53,4 +85,23 @@ def load_settings() -> Settings:
         port=int(os.environ.get("KC_NEWS_RADAR_PORT", "8765")),
         user_agent=os.environ.get("KC_NEWS_RADAR_USER_AGENT", USER_AGENT),
         http_timeout=float(os.environ.get("KC_NEWS_RADAR_TIMEOUT", HTTP_TIMEOUT_SECONDS)),
+        collection_enabled=_strict_bool_env("KC_NEWS_RADAR_COLLECTION_ENABLED", True),
+        collection_cadence_seconds=_bounded_int_env(
+            "KC_NEWS_RADAR_COLLECTION_CADENCE_SECONDS",
+            DEFAULT_COLLECTION_CADENCE_SECONDS,
+            minimum=30,
+            maximum=86_400,
+        ),
+        stale_after_seconds=_bounded_int_env(
+            "KC_NEWS_RADAR_STALE_AFTER_SECONDS",
+            DEFAULT_STALE_AFTER_SECONDS,
+            minimum=60,
+            maximum=604_800,
+        ),
+        collection_lease_seconds=_bounded_int_env(
+            "KC_NEWS_RADAR_COLLECTION_LEASE_SECONDS",
+            DEFAULT_COLLECTION_LEASE_SECONDS,
+            minimum=60,
+            maximum=86_400,
+        ),
     )

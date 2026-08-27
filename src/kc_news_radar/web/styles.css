@@ -37,6 +37,9 @@ a:hover { text-decoration: underline; }
   padding: 6px 22px; font-weight: 600; letter-spacing: 0.03em;
 }
 .database-banner { background: #fee2e2; border-top: 1px solid var(--bad); color: #7f1d1d; padding: 7px 22px; font-weight: 600; }
+.collection-banner { padding: 7px 22px; font-weight: 700; border-top: 1px solid var(--line); }
+.collection-banner--ok { background: #ecfdf5; color: #14532d; }
+.collection-banner--warn { background: #fffbeb; color: #713f12; }
 
 /* ---------- tabs ---------- */
 .tabs {
@@ -134,3 +137,7 @@ a:hover { text-decoration: underline; }
 .callout { border-left: 4px solid var(--ok); background: #ecfdf5; padding: 10px 12px; margin: 10px 0; }
 .callout--warn { border-left-color: var(--warn); background: #fffbeb; }
 @media (max-width: 900px) { .workflow-grid { grid-template-columns: 1fr; } }
+.operations-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; margin: 12px 0; }
+.operation-card { background: var(--panel); border: 1px solid var(--line); padding: 11px; }
+.operation-card__label { color: var(--ink-3); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+.operation-card__value { margin-top: 4px; font-weight: 700; overflow-wrap: anywhere; }

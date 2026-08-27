@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from .models import (
+    CollectionRunState,
+    CollectionTrigger,
     Forecast,
     ForecastStatus,
     Outcome,
@@ -170,6 +172,82 @@ CREATE TABLE IF NOT EXISTS feedback (
     label TEXT NOT NULL,
     note TEXT,
     created_at TEXT NOT NULL
+);
+
+-- Immutable collection request identity. Lifecycle changes are append-only
+-- events below rather than updates to this row.
+CREATE TABLE IF NOT EXISTS collection_runs (
+    run_id TEXT PRIMARY KEY,
+    trigger_type TEXT NOT NULL,
+    requested_at TEXT NOT NULL,
+    scheduled_for TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_collection_runs_requested
+    ON collection_runs(requested_at DESC);
+
+CREATE TABLE IF NOT EXISTS collection_run_events (
+    event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL,
+    event_at TEXT NOT NULL,
+    state TEXT NOT NULL,
+    sources_attempted INTEGER NOT NULL DEFAULT 0,
+    sources_succeeded INTEGER NOT NULL DEFAULT 0,
+    sources_failed INTEGER NOT NULL DEFAULT 0,
+    items_collected INTEGER NOT NULL DEFAULT 0,
+    items_updated INTEGER NOT NULL DEFAULT 0,
+    pipeline_json TEXT,
+    failure_summary TEXT,
+    completed_cleanly INTEGER NOT NULL DEFAULT 0,
+    blocked_by_run_id TEXT,
+    FOREIGN KEY (run_id) REFERENCES collection_runs(run_id)
+);
+CREATE INDEX IF NOT EXISTS idx_collection_events_run
+    ON collection_run_events(run_id, event_id);
+CREATE INDEX IF NOT EXISTS idx_collection_events_state
+    ON collection_run_events(state, event_at DESC);
+
+CREATE TABLE IF NOT EXISTS collection_source_results (
+    run_id TEXT NOT NULL,
+    source_name TEXT NOT NULL,
+    attempted_at TEXT NOT NULL,
+    completed_at TEXT NOT NULL,
+    outcome TEXT NOT NULL,
+    source_status TEXT NOT NULL,
+    item_count INTEGER NOT NULL,
+    items_updated INTEGER NOT NULL DEFAULT 0,
+    latency_ms INTEGER NOT NULL,
+    failure_kind TEXT,
+    message TEXT,
+    PRIMARY KEY (run_id, source_name),
+    FOREIGN KEY (run_id) REFERENCES collection_runs(run_id)
+);
+CREATE INDEX IF NOT EXISTS idx_collection_source_latest
+    ON collection_source_results(source_name, completed_at DESC);
+
+-- Cross-process lease. It is an operational lock, while every acquisition,
+-- block, failure, and abandonment remains visible in append-only run events.
+CREATE TABLE IF NOT EXISTS collection_lease (
+    singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+    run_id TEXT NOT NULL,
+    owner_token TEXT NOT NULL,
+    acquired_at TEXT NOT NULL,
+    heartbeat_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    FOREIGN KEY (run_id) REFERENCES collection_runs(run_id)
+);
+
+-- Mutable operational projection used by the dashboard. Run history remains
+-- authoritative for what actually executed.
+CREATE TABLE IF NOT EXISTS scheduler_state (
+    singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+    configured_enabled INTEGER NOT NULL,
+    worker_state TEXT NOT NULL,
+    cadence_seconds INTEGER NOT NULL,
+    stale_after_seconds INTEGER NOT NULL,
+    next_run_at TEXT,
+    heartbeat_at TEXT NOT NULL,
+    worker_id TEXT
 );
 """
 
@@ -677,5 +755,445 @@ def list_feedback(
     where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
     rows = conn.execute(
         f"SELECT * FROM feedback{where} ORDER BY created_at DESC", params
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+# ---------------------------------------------------------------------------
+# collection run history and cross-process lease
+# ---------------------------------------------------------------------------
+
+TERMINAL_COLLECTION_STATES = {
+    CollectionRunState.COMPLETED.value,
+    CollectionRunState.PARTIAL_FAILURE.value,
+    CollectionRunState.FAILED.value,
+    CollectionRunState.ABANDONED.value,
+    CollectionRunState.BLOCKED_OVERLAP.value,
+}
+
+
+def _latest_collection_state(conn: sqlite3.Connection, run_id: str) -> str | None:
+    row = conn.execute(
+        """
+        SELECT state FROM collection_run_events
+        WHERE run_id=? ORDER BY event_id DESC LIMIT 1
+        """,
+        (run_id,),
+    ).fetchone()
+    return str(row["state"]) if row else None
+
+
+def append_collection_event(
+    conn: sqlite3.Connection,
+    *,
+    run_id: str,
+    event_at: datetime,
+    state: CollectionRunState,
+    sources_attempted: int = 0,
+    sources_succeeded: int = 0,
+    sources_failed: int = 0,
+    items_collected: int = 0,
+    items_updated: int = 0,
+    pipeline_result: dict[str, Any] | None = None,
+    failure_summary: str | None = None,
+    completed_cleanly: bool = False,
+    blocked_by_run_id: str | None = None,
+) -> int:
+    cur = conn.execute(
+        """
+        INSERT INTO collection_run_events (
+            run_id, event_at, state, sources_attempted, sources_succeeded,
+            sources_failed, items_collected, items_updated, pipeline_json,
+            failure_summary, completed_cleanly, blocked_by_run_id
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+        """,
+        (
+            run_id,
+            _iso(event_at),
+            state.value,
+            sources_attempted,
+            sources_succeeded,
+            sources_failed,
+            items_collected,
+            items_updated,
+            json.dumps(pipeline_result, sort_keys=True) if pipeline_result is not None else None,
+            failure_summary,
+            int(completed_cleanly),
+            blocked_by_run_id,
+        ),
+    )
+    return int(cur.lastrowid)
+
+
+def acquire_collection_run(
+    conn: sqlite3.Connection,
+    *,
+    run_id: str,
+    owner_token: str,
+    trigger_type: CollectionTrigger,
+    requested_at: datetime,
+    scheduled_for: datetime | None,
+    lease_seconds: int,
+) -> dict[str, Any]:
+    """Atomically create a run request and acquire or reject the DB lease."""
+    from datetime import timedelta
+
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        conn.execute(
+            """
+            INSERT INTO collection_runs (
+                run_id, trigger_type, requested_at, scheduled_for, created_at
+            ) VALUES (?,?,?,?,?)
+            """,
+            (
+                run_id,
+                trigger_type.value,
+                _iso(requested_at),
+                _iso(scheduled_for),
+                _iso(requested_at),
+            ),
+        )
+        lease = conn.execute("SELECT * FROM collection_lease WHERE singleton_id=1").fetchone()
+        if lease and datetime.fromisoformat(lease["expires_at"]) > requested_at:
+            append_collection_event(
+                conn,
+                run_id=run_id,
+                event_at=requested_at,
+                state=CollectionRunState.BLOCKED_OVERLAP,
+                failure_summary="Collection was not started because another run held the database lease.",
+                blocked_by_run_id=lease["run_id"],
+            )
+            conn.commit()
+            return {"acquired": False, "blocked_by_run_id": lease["run_id"]}
+
+        abandoned_run_id: str | None = None
+        if lease:
+            abandoned_run_id = str(lease["run_id"])
+            if _latest_collection_state(conn, abandoned_run_id) == CollectionRunState.RUNNING.value:
+                append_collection_event(
+                    conn,
+                    run_id=abandoned_run_id,
+                    event_at=requested_at,
+                    state=CollectionRunState.ABANDONED,
+                    failure_summary="Lease expired before the run recorded completion; outcome is indeterminate.",
+                )
+            conn.execute("DELETE FROM collection_lease WHERE singleton_id=1")
+
+        expires_at = requested_at + timedelta(seconds=lease_seconds)
+        conn.execute(
+            """
+            INSERT INTO collection_lease (
+                singleton_id, run_id, owner_token, acquired_at, heartbeat_at, expires_at
+            ) VALUES (1,?,?,?,?,?)
+            """,
+            (
+                run_id,
+                owner_token,
+                _iso(requested_at),
+                _iso(requested_at),
+                _iso(expires_at),
+            ),
+        )
+        append_collection_event(
+            conn,
+            run_id=run_id,
+            event_at=requested_at,
+            state=CollectionRunState.RUNNING,
+        )
+        conn.commit()
+        return {"acquired": True, "abandoned_run_id": abandoned_run_id}
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def heartbeat_collection_lease(
+    conn: sqlite3.Connection,
+    *,
+    run_id: str,
+    owner_token: str,
+    now: datetime,
+    lease_seconds: int,
+) -> None:
+    from datetime import timedelta
+
+    cur = conn.execute(
+        """
+        UPDATE collection_lease SET heartbeat_at=?, expires_at=?
+        WHERE singleton_id=1 AND run_id=? AND owner_token=?
+        """,
+        (_iso(now), _iso(now + timedelta(seconds=lease_seconds)), run_id, owner_token),
+    )
+    if cur.rowcount != 1:
+        raise RuntimeError("collection lease ownership was lost")
+
+
+def insert_collection_source_result(
+    conn: sqlite3.Connection,
+    *,
+    run_id: str,
+    source_name: str,
+    attempted_at: datetime,
+    completed_at: datetime,
+    outcome: str,
+    source_status: str,
+    item_count: int,
+    items_updated: int,
+    latency_ms: int,
+    failure_kind: str | None,
+    message: str | None,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO collection_source_results (
+            run_id, source_name, attempted_at, completed_at, outcome,
+            source_status, item_count, items_updated, latency_ms,
+            failure_kind, message
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+        """,
+        (
+            run_id,
+            source_name,
+            _iso(attempted_at),
+            _iso(completed_at),
+            outcome,
+            source_status,
+            item_count,
+            items_updated,
+            latency_ms,
+            failure_kind,
+            message,
+        ),
+    )
+
+
+def finish_collection_run(
+    conn: sqlite3.Connection,
+    *,
+    run_id: str,
+    owner_token: str,
+    completed_at: datetime,
+    state: CollectionRunState,
+    sources_attempted: int,
+    sources_succeeded: int,
+    sources_failed: int,
+    items_collected: int,
+    items_updated: int,
+    pipeline_result: dict[str, Any] | None,
+    failure_summary: str | None,
+    completed_cleanly: bool,
+) -> None:
+    lease = conn.execute(
+        """
+        SELECT 1 FROM collection_lease
+        WHERE singleton_id=1 AND run_id=? AND owner_token=?
+        """,
+        (run_id, owner_token),
+    ).fetchone()
+    if not lease:
+        raise RuntimeError("collection lease ownership was lost before completion")
+    append_collection_event(
+        conn,
+        run_id=run_id,
+        event_at=completed_at,
+        state=state,
+        sources_attempted=sources_attempted,
+        sources_succeeded=sources_succeeded,
+        sources_failed=sources_failed,
+        items_collected=items_collected,
+        items_updated=items_updated,
+        pipeline_result=pipeline_result,
+        failure_summary=failure_summary,
+        completed_cleanly=completed_cleanly,
+    )
+    conn.execute(
+        "DELETE FROM collection_lease WHERE singleton_id=1 AND run_id=? AND owner_token=?",
+        (run_id, owner_token),
+    )
+
+
+def recover_abandoned_collection_runs(
+    conn: sqlite3.Connection, *, now: datetime
+) -> list[str]:
+    """Mark only runs whose lease is absent or expired as abandoned."""
+    conn.execute("BEGIN IMMEDIATE")
+    recovered: list[str] = []
+    try:
+        lease = conn.execute("SELECT * FROM collection_lease WHERE singleton_id=1").fetchone()
+        lease_active = bool(lease and datetime.fromisoformat(lease["expires_at"]) > now)
+        rows = conn.execute(
+            """
+            SELECT r.run_id
+            FROM collection_runs r
+            JOIN collection_run_events e ON e.event_id = (
+                SELECT MAX(e2.event_id) FROM collection_run_events e2 WHERE e2.run_id=r.run_id
+            )
+            WHERE e.state=?
+            """,
+            (CollectionRunState.RUNNING.value,),
+        ).fetchall()
+        for row in rows:
+            run_id = str(row["run_id"])
+            if lease_active and lease["run_id"] == run_id:
+                continue
+            append_collection_event(
+                conn,
+                run_id=run_id,
+                event_at=now,
+                state=CollectionRunState.ABANDONED,
+                failure_summary="Run was found incomplete without an active lease during startup recovery.",
+            )
+            recovered.append(run_id)
+        if lease and not lease_active:
+            conn.execute("DELETE FROM collection_lease WHERE singleton_id=1")
+        conn.commit()
+        return recovered
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def _collection_run_row(row: sqlite3.Row) -> dict[str, Any]:
+    result = dict(row)
+    raw_pipeline = result.pop("pipeline_json", None)
+    result["pipeline_result"] = json.loads(raw_pipeline) if raw_pipeline else None
+    result["completed_cleanly"] = bool(result.get("completed_cleanly"))
+    return result
+
+
+def list_collection_runs(conn: sqlite3.Connection, limit: int = 50) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        """
+        SELECT r.*, e.event_at AS latest_event_at, e.state,
+               (SELECT MIN(es.event_at) FROM collection_run_events es
+                WHERE es.run_id=r.run_id AND es.state='RUNNING') AS started_at,
+               CASE WHEN e.state IN ('COMPLETED','PARTIAL_FAILURE','FAILED','ABANDONED','BLOCKED_OVERLAP')
+                    THEN e.event_at ELSE NULL END AS completed_at,
+               e.sources_attempted, e.sources_succeeded, e.sources_failed,
+               e.items_collected, e.items_updated, e.pipeline_json,
+               e.failure_summary, e.completed_cleanly, e.blocked_by_run_id
+        FROM collection_runs r
+        JOIN collection_run_events e ON e.event_id = (
+            SELECT MAX(e2.event_id) FROM collection_run_events e2 WHERE e2.run_id=r.run_id
+        )
+        ORDER BY r.requested_at DESC LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+    return [_collection_run_row(row) for row in rows]
+
+
+def get_collection_run(conn: sqlite3.Connection, run_id: str) -> dict[str, Any] | None:
+    runs = conn.execute(
+        """
+        SELECT r.*, e.event_at AS latest_event_at, e.state,
+               (SELECT MIN(es.event_at) FROM collection_run_events es
+                WHERE es.run_id=r.run_id AND es.state='RUNNING') AS started_at,
+               CASE WHEN e.state IN ('COMPLETED','PARTIAL_FAILURE','FAILED','ABANDONED','BLOCKED_OVERLAP')
+                    THEN e.event_at ELSE NULL END AS completed_at,
+               e.sources_attempted, e.sources_succeeded, e.sources_failed,
+               e.items_collected, e.items_updated, e.pipeline_json,
+               e.failure_summary, e.completed_cleanly, e.blocked_by_run_id
+        FROM collection_runs r
+        JOIN collection_run_events e ON e.event_id = (
+            SELECT MAX(e2.event_id) FROM collection_run_events e2 WHERE e2.run_id=r.run_id
+        )
+        WHERE r.run_id=?
+        """,
+        (run_id,),
+    ).fetchone()
+    if not runs:
+        return None
+    result = _collection_run_row(runs)
+    result["events"] = [
+        _collection_run_row(row)
+        for row in conn.execute(
+            "SELECT * FROM collection_run_events WHERE run_id=? ORDER BY event_id",
+            (run_id,),
+        ).fetchall()
+    ]
+    result["sources"] = [
+        dict(row)
+        for row in conn.execute(
+            "SELECT * FROM collection_source_results WHERE run_id=? ORDER BY source_name",
+            (run_id,),
+        ).fetchall()
+    ]
+    return result
+
+
+def current_collection_lease(conn: sqlite3.Connection, *, now: datetime) -> dict[str, Any] | None:
+    row = conn.execute("SELECT * FROM collection_lease WHERE singleton_id=1").fetchone()
+    if not row:
+        return None
+    result = dict(row)
+    result["active"] = datetime.fromisoformat(result["expires_at"]) > now
+    return result
+
+
+def upsert_scheduler_state(
+    conn: sqlite3.Connection,
+    *,
+    configured_enabled: bool,
+    worker_state: str,
+    cadence_seconds: int,
+    stale_after_seconds: int,
+    next_run_at: datetime | None,
+    heartbeat_at: datetime,
+    worker_id: str | None,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO scheduler_state (
+            singleton_id, configured_enabled, worker_state, cadence_seconds,
+            stale_after_seconds, next_run_at, heartbeat_at, worker_id
+        ) VALUES (1,?,?,?,?,?,?,?)
+        ON CONFLICT(singleton_id) DO UPDATE SET
+            configured_enabled=excluded.configured_enabled,
+            worker_state=excluded.worker_state,
+            cadence_seconds=excluded.cadence_seconds,
+            stale_after_seconds=excluded.stale_after_seconds,
+            next_run_at=excluded.next_run_at,
+            heartbeat_at=excluded.heartbeat_at,
+            worker_id=excluded.worker_id
+        """,
+        (
+            int(configured_enabled),
+            worker_state,
+            cadence_seconds,
+            stale_after_seconds,
+            _iso(next_run_at),
+            _iso(heartbeat_at),
+            worker_id,
+        ),
+    )
+
+
+def get_scheduler_state(conn: sqlite3.Connection) -> dict[str, Any] | None:
+    row = conn.execute("SELECT * FROM scheduler_state WHERE singleton_id=1").fetchone()
+    if not row:
+        return None
+    result = dict(row)
+    result["configured_enabled"] = bool(result["configured_enabled"])
+    return result
+
+
+def latest_source_run_results(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        """
+        SELECT csr.*,
+               (SELECT MAX(csr3.completed_at)
+                FROM collection_source_results csr3
+                WHERE csr3.source_name=csr.source_name
+                  AND csr3.outcome IN ('SUCCEEDED','ZERO_ITEMS')) AS last_successful_at
+        FROM collection_source_results csr
+        WHERE csr.completed_at = (
+            SELECT MAX(csr2.completed_at)
+            FROM collection_source_results csr2
+            WHERE csr2.source_name=csr.source_name
+        )
+        ORDER BY csr.source_name
+        """
     ).fetchall()
     return [dict(row) for row in rows]

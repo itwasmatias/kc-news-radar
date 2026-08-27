@@ -17,6 +17,7 @@
     </div>
     <div id="demoBanner" class="demo-banner" hidden>DEMO DATA — synthetic fixtures for demonstration only.</div>
     <div id="databaseBanner" class="database-banner" hidden></div>
+    <div id="collectionBanner" class="collection-banner"></div>
   </header>
 
   <nav class="tabs" role="tablist">
@@ -26,6 +27,7 @@
     <button class="tab" data-tab="ledger">Forecast Ledger</button>
     <button class="tab" data-tab="validation">Validation</button>
     <button class="tab" data-tab="sources">Source Health</button>
+    <button class="tab" data-tab="collection">Collection</button>
   </nav>
 
   <main class="content">
@@ -114,6 +116,24 @@
         <thead><tr><th>Source</th><th>Status</th><th>Last attempt</th><th>Last success</th><th>Items</th><th>Latency</th><th>Note</th></tr></thead>
         <tbody id="sourcesBody"></tbody>
       </table>
+    </section>
+
+    <!-- COLLECTION OPERATIONS -->
+    <section id="collection" class="panel">
+      <div class="panel__header"><h1>Automatic collection</h1></div>
+      <div id="collectionSummary" class="operations-grid"></div>
+      <div id="collectionWarnings"></div>
+      <h2>Recent collection runs</h2>
+      <table class="table">
+        <thead><tr><th>Requested</th><th>Trigger</th><th>State</th><th>Sources</th><th>Items</th><th>Completed</th><th>Note</th></tr></thead>
+        <tbody id="collectionRunsBody"></tbody>
+      </table>
+      <h2>Latest source collection evidence</h2>
+      <table class="table">
+        <thead><tr><th>Source</th><th>State</th><th>Outcome</th><th>Age</th><th>Items</th><th>Failure kind</th><th>Note</th></tr></thead>
+        <tbody id="collectionSourcesBody"></tbody>
+      </table>
+      <p class="disclaimer">Collection controls trust the local machine. No authentication or remote scheduling is provided in v0.1.</p>
     </section>
   </main>
 

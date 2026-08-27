@@ -7,6 +7,9 @@ src/kc_news_radar/
 ├── __init__.py          # package version + SCORING_MODEL_VERSION constant
 ├── app.py               # FastAPI: /api/* endpoints + static frontend mount
 ├── collect.py           # CLI: `kc-news-radar-collect` entry point
+├── collection_runtime.py # one leased, observable collection cycle
+├── scheduler.py         # small cadence thread + combined service command
+├── freshness.py         # run-derived freshness and source state
 ├── config.py            # environment-driven Settings dataclass + Chicago TZ
 ├── db.py                # sqlite3-based persistence (no ORM)
 ├── demo.py              # deterministic offline fixtures for demo mode
@@ -79,6 +82,17 @@ plain Python dicts and does not require network access.
 - **`resolution_targets`** — the exact forecast version resolved. New
   resolutions are single-assignment and target the latest persisted version.
 - **`feedback`** — newsroom-manager reactions on items/signals/forecasts.
+- **`collection_runs`** — immutable run request identity and trigger metadata.
+- **`collection_run_events`** — append-only lifecycle facts (`RUNNING`,
+  `COMPLETED`, `PARTIAL_FAILURE`, `FAILED`, `ABANDONED`, or
+  `BLOCKED_OVERLAP`). Completion counters and pipeline summaries live here.
+- **`collection_source_results`** — one immutable result per attempted source
+  and run, distinguishing failures, degraded zero-item parses, and legitimate
+  empty feeds.
+- **`collection_lease`** — singleton expiring SQLite lease used by all manual
+  and scheduled callers for cross-process exclusion.
+- **`scheduler_state`** — mutable operational projection for worker heartbeat,
+  cadence, and next expected cycle; run events remain execution authority.
 
 Timestamps are stored as ISO-8601 UTC strings; the DB layer refuses naive
 datetimes. Display code (only) formats to `America/Chicago`.
@@ -120,3 +134,14 @@ Evidence snapshots and resolutions follow the same rule: a new forecast
 version receives its own evidence snapshot, and an outcome is stored beside—not
 inside—the forecast. Legacy forecasts without snapshots return an explicit
 `LEGACY_NOT_CAPTURED` boundary instead of a join to mutable current content.
+
+## Automatic collection boundary
+
+`kc-news-radar-run` starts FastAPI and one small cadence thread in the same
+process. This avoids external scheduling infrastructure, but the thread is not
+the concurrency authority. `collection_runtime.execute_collection_cycle`
+atomically acquires `collection_lease` under `BEGIN IMMEDIATE`, so a manual CLI
+in another process cannot overlap it. Each source result commits separately;
+the signal/forecast/evidence pipeline retains its existing atomic commit.
+Interrupted runs keep earlier committed facts, remain `RUNNING` until the lease
+expires, and become `ABANDONED` on startup recovery or the next acquisition.

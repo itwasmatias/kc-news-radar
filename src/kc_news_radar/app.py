@@ -12,6 +12,9 @@ Endpoints:
     POST /api/feedback        record newsroom feedback (label + optional note)
     POST /api/forecasts/{id}/resolution  record one immutable outcome
     GET /api/performance      descriptive resolved-forecast counts
+    GET /api/collection/status current scheduler and freshness state
+    GET /api/collection/runs   recent durable run history
+    GET /api/collection/runs/{id} one run with events and source results
 
 Security notes:
 
@@ -40,6 +43,7 @@ from .ledger.resolution import forecast_status_after_now
 from .ledger.resolution import record_resolution
 from .models import Outcome
 from .performance import build_performance_summary
+from .freshness import build_collection_status
 from .pipeline.briefing import build_brief
 
 log = logging.getLogger("kc_news_radar.app")
@@ -82,7 +86,7 @@ def _database_context(health_rows: list[dict[str, Any]]) -> dict[str, Any]:
         )
     if not health_rows:
         warnings.append("This database has no collection-health evidence yet.")
-    if age_hours is not None and age_hours > 24:
+    if age_hours is not None and age_hours * 3600 > settings.stale_after_seconds:
         warnings.append(f"The latest collection attempt is {age_hours} hours old.")
     if unconfigured:
         warnings.append(
@@ -310,6 +314,29 @@ def api_record_resolution(forecast_id: str, payload: ResolutionIn) -> dict[str, 
 def api_performance() -> dict[str, Any]:
     with _conn() as conn:
         return build_performance_summary(conn)
+
+
+@app.get("/api/collection/status")
+def api_collection_status() -> dict[str, Any]:
+    settings = load_settings()
+    with _conn() as conn:
+        return build_collection_status(conn, settings=settings)
+
+
+@app.get("/api/collection/runs")
+def api_collection_runs(limit: int = Query(20, ge=1, le=200)) -> dict[str, Any]:
+    with _conn() as conn:
+        rows = dbmod.list_collection_runs(conn, limit=limit)
+    return {"runs": rows, "count": len(rows)}
+
+
+@app.get("/api/collection/runs/{run_id}")
+def api_collection_run_detail(run_id: str) -> dict[str, Any]:
+    with _conn() as conn:
+        run = dbmod.get_collection_run(conn, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"unknown collection run {run_id!r}")
+    return run
 
 
 # ---------------------------------------------------------------------------

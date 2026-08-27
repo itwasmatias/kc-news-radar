@@ -37,6 +37,8 @@ of information gathering ahead of the daily editorial meeting.
    evidence captured for each new forecast version, accepting constrained
    newsroom feedback, recording one version-targeted outcome without changing
    the forecast, and reporting descriptive resolved-outcome counts.
+7. **Runs continuously** on a controlled local cadence, recording every run,
+   source result, overlap rejection, and interrupted-run recovery in SQLite.
 
 ---
 
@@ -49,7 +51,8 @@ pip install -e '.[dev]'
 
 # Try it with deterministic synthetic data (no network needed) in a named DB:
 KC_NEWS_RADAR_DB=./data/demo.db KC_NEWS_RADAR_DEMO=1 kc-news-radar-collect
-KC_NEWS_RADAR_DB=./data/demo.db kc-news-radar-serve  # http://127.0.0.1:8765
+KC_NEWS_RADAR_DB=./data/demo.db KC_NEWS_RADAR_DEMO=1 kc-news-radar-run
+# → automatic offline demo collection + dashboard on http://127.0.0.1:8765
 ```
 
 Every demo record is prefixed `[DEMO DATA]` so you can never confuse it with
@@ -61,7 +64,7 @@ To run against live public sources instead:
 KC_NEWS_RADAR_DB=./data/live.db kc-news-radar-collect
 kc-news-radar-collect --list     # list adapters
 KC_NEWS_RADAR_DB=./data/live.db kc-news-radar-collect --source nws_kc --verbose
-KC_NEWS_RADAR_DB=./data/live.db kc-news-radar-serve
+KC_NEWS_RADAR_DB=./data/live.db kc-news-radar-run
 ```
 
 ---
@@ -88,6 +91,10 @@ Environment variables (all optional):
 | `KC_NEWS_RADAR_PORT`        | `8765`                           | Web server port                      |
 | `KC_NEWS_RADAR_TIMEOUT`     | `15.0`                           | Per-request HTTP timeout (seconds)   |
 | `KC_NEWS_RADAR_USER_AGENT`  | `KCNewsRadar/0.1 (…)`            | User-Agent for all outbound HTTP     |
+| `KC_NEWS_RADAR_COLLECTION_ENABLED` | `1`                    | Enable automatic collection in `kc-news-radar-run` |
+| `KC_NEWS_RADAR_COLLECTION_CADENCE_SECONDS` | `900`            | Seconds between completed cycles (30–86400) |
+| `KC_NEWS_RADAR_STALE_AFTER_SECONDS` | `3600`                 | Age at which completed run evidence is stale (60–604800) |
+| `KC_NEWS_RADAR_COLLECTION_LEASE_SECONDS` | `1800`             | Cross-process lease expiry (60–86400) |
 
 The database file is created on first use. Reopening it later preserves every
 source item, signal, forecast version, evidence snapshot, resolution, and
@@ -97,6 +104,31 @@ stale collection evidence, or source-configuration drift is detected. For a
 review or demonstration, always set `KC_NEWS_RADAR_DB` to the exact snapshot
 you intend to inspect. Local database files are ignored and are never selected
 by filename heuristics.
+
+## Continuous operation
+
+Run the dashboard and cadence worker together:
+
+```bash
+KC_NEWS_RADAR_DB=./data/live.db kc-news-radar-run
+```
+
+The first scheduled cycle is due immediately; later cycles are scheduled from
+the prior cycle's completion, so a slow cycle does not create a catch-up retry
+storm. Manual collection remains available through `kc-news-radar-collect` and
+uses the same database lease. Disable automatic cycles while retaining the
+dashboard with:
+
+```bash
+KC_NEWS_RADAR_DB=./data/live.db \
+KC_NEWS_RADAR_COLLECTION_ENABLED=0 \
+kc-news-radar-run
+```
+
+The **Collection** dashboard tab and `/api/collection/*` endpoints show current
+worker state, last attempt/completion/success, evidence age, next scheduled
+cycle, recent immutable run history, and per-source failure evidence. See
+`docs/AUTOMATIC_COLLECTION.md` for locking and recovery semantics.
 
 ## Closed-loop editorial validation
 
@@ -129,6 +161,7 @@ sample insufficient for stable interpretation. See
 - `docs/EDITORIAL_SAFETY.md` — what the scores mean and, critically, don't
 - `docs/DEMO.md` — running the demo without network access
 - `docs/VALIDATION_WORKFLOW.md` — evidence, feedback, outcomes, and performance
+- `docs/AUTOMATIC_COLLECTION.md` — scheduler, run history, overlap, and recovery
 
 ---
 

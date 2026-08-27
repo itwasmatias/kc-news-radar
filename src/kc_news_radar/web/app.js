@@ -29,6 +29,12 @@ function fmtDate(iso) {
   } catch { return iso; }
 }
 
+function fmtAge(hours) {
+  if (hours === null || hours === undefined) return "unknown";
+  if (hours < 1) return `${Math.round(hours * 60)}m`;
+  return `${hours.toFixed(1)}h`;
+}
+
 async function fetchJSON(url) {
   const r = await fetch(url);
   if (!r.ok) throw new Error(`${url} -> ${r.status}`);
@@ -260,19 +266,47 @@ function renderPerformance(performance) {
     <p class="scientific-note">${esc(performance.scientific_note)}</p>`;
 }
 
+function stateBadge(state) {
+  const ok = ["COMPLETED", "FRESH", "FRESH_ZERO_ITEMS"].includes(state);
+  const warn = ["PARTIAL_FAILURE", "STALE", "DEGRADED", "FRESH_PARTIAL_FAILURE", "BLOCKED_OVERLAP", "ABANDONED"].includes(state);
+  return `<span class="badge badge--${ok ? "ok" : warn ? "warn" : "bad"}">${esc(state)}</span>`;
+}
+
+function renderCollectionSummary(status) {
+  const auto = status.automatic_collection_enabled ? "ON" : "OFF";
+  return [
+    ["Auto collection", `${auto} · worker ${status.worker_state}${status.worker_responsive ? "" : " · not responsive"}`],
+    ["Current state", status.collection_running ? `RUNNING · ${status.active_run_id}` : "IDLE"],
+    ["Last successful run", status.last_successful_at ? fmtDate(status.last_successful_at) : "none recorded"],
+    ["Evidence freshness", `${status.freshness_state} · age ${fmtAge(status.evidence_age_hours)}`],
+    ["Next scheduled run", status.next_scheduled_run ? fmtDate(status.next_scheduled_run) : "not scheduled"],
+    ["Cadence / stale threshold", `${status.cadence_seconds}s / ${status.stale_after_seconds}s`],
+  ].map(([label, value]) => `<div class="operation-card"><div class="operation-card__label">${esc(label)}</div><div class="operation-card__value">${esc(value)}</div></div>`).join("");
+}
+
+function collectionRunRow(run) {
+  return `<tr><td>${esc(fmtDate(run.requested_at))}</td><td>${esc(run.trigger_type)}</td><td>${stateBadge(run.state)}</td><td>${run.sources_succeeded}/${run.sources_attempted} succeeded · ${run.sources_failed} failed</td><td>${run.items_collected}</td><td>${esc(fmtDate(run.completed_at))}</td><td>${esc(run.failure_summary || "")}</td></tr>`;
+}
+
+function collectionSourceRow(source) {
+  return `<tr><td>${esc(source.source_name)}</td><td>${stateBadge(source.freshness_state)}</td><td>${esc(source.outcome)}</td><td>evidence ${esc(fmtAge(source.evidence_age_hours))} · attempt ${esc(fmtAge(source.attempt_age_hours))}</td><td>${source.item_count}</td><td>${esc(source.failure_kind || "")}</td><td>${esc(source.message || "")}</td></tr>`;
+}
+
 async function loadAll() {
   try {
-    const [brief, sources, forecasts, signals, health, performance] = await Promise.all([
+    const [brief, sources, forecasts, signals, health, performance, collectionStatus, collectionRuns] = await Promise.all([
       fetchJSON("/api/brief"),
       fetchJSON("/api/sources"),
       fetchJSON("/api/forecasts"),
       fetchJSON("/api/signals?limit=200"),
       fetchJSON("/api/health"),
       fetchJSON("/api/performance"),
+      fetchJSON("/api/collection/status"),
+      fetchJSON("/api/collection/runs?limit=20"),
     ]);
 
     // Top bar
-    const meta = `${esc(brief.generated_at_local)} · ${brief.sources_summary.healthy} healthy · ${brief.sources_summary.degraded} degraded · ${brief.sources_summary.failed} failed · scoring model ${esc(brief.scoring_model_version)}`;
+    const meta = `${esc(brief.generated_at_local)} · ${brief.sources_summary.healthy} healthy · ${brief.sources_summary.degraded} degraded · ${brief.sources_summary.failed} failed · evidence ${esc(collectionStatus.freshness_state)} · scoring model ${esc(brief.scoring_model_version)}`;
     $("topMeta").innerHTML = meta;
     if (health.demo_mode) {
       $("demoBanner").hidden = false;
@@ -283,6 +317,8 @@ async function loadAll() {
     } else {
       $("databaseBanner").hidden = true;
     }
+    $("collectionBanner").className = `collection-banner collection-banner--${collectionStatus.freshness_state === "FRESH" ? "ok" : "warn"}`;
+    $("collectionBanner").textContent = `AUTO COLLECTION: ${collectionStatus.automatic_collection_enabled ? "ON" : "OFF"} · ${collectionStatus.collection_running ? "RUNNING" : collectionStatus.worker_state} · EVIDENCE: ${collectionStatus.freshness_state} (${fmtAge(collectionStatus.evidence_age_hours)}) · NEXT: ${collectionStatus.next_scheduled_run ? fmtDate(collectionStatus.next_scheduled_run) : "not scheduled"}`;
 
     // Brief header
     $("briefMeta").textContent = brief.generated_at_local;
@@ -315,6 +351,11 @@ async function loadAll() {
     document.querySelectorAll(".forecast-open").forEach(button => button.addEventListener("click", () => openForecast(button.dataset.forecastId)));
 
     $("performanceSummary").innerHTML = renderPerformance(performance);
+
+    $("collectionSummary").innerHTML = renderCollectionSummary(collectionStatus);
+    $("collectionWarnings").innerHTML = collectionStatus.warnings.map(w => `<div class="callout callout--warn">${esc(w)}</div>`).join("");
+    $("collectionRunsBody").innerHTML = collectionRuns.runs.length ? collectionRuns.runs.map(collectionRunRow).join("") : "<tr><td colspan='7' class='empty'>No observable collection runs recorded.</td></tr>";
+    $("collectionSourcesBody").innerHTML = collectionStatus.sources.length ? collectionStatus.sources.map(collectionSourceRow).join("") : "<tr><td colspan='7' class='empty'>No per-source run evidence recorded.</td></tr>";
 
     // Source health
     $("sourcesBody").innerHTML = sources.sources.map(sourceRow).join("");

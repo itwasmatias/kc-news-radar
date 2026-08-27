@@ -63,6 +63,21 @@ class Outcome(str, Enum):
     EXPIRED_UNRESOLVED = "EXPIRED_UNRESOLVED"
 
 
+class CollectionTrigger(str, Enum):
+    MANUAL = "MANUAL"
+    SCHEDULED = "SCHEDULED"
+    DEMO = "DEMO"
+
+
+class CollectionRunState(str, Enum):
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"
+    PARTIAL_FAILURE = "PARTIAL_FAILURE"
+    FAILED = "FAILED"
+    ABANDONED = "ABANDONED"
+    BLOCKED_OVERLAP = "BLOCKED_OVERLAP"
+
+
 class SourceItem(BaseModel):
     """Normalized item from a public information source.
 
