@@ -123,7 +123,9 @@ separate timer or cron job to replace the built-in cadence.
 The backup command reads the live source through SQLite's online backup API,
 writes a standalone database, reopens it read-only, runs `quick_check`, reports
 both paths, and then retains the newest configured number of successful Radar
-backup files. Retention ignores unrelated files and partial files.
+backup files belonging to the current source database stem. Backups for other
+Radar databases sharing the directory, unrelated files, and partial files are
+not retention candidates.
 
 ```bash
 .venv/bin/python -m kc_news_radar.operations backup

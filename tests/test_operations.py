@@ -10,6 +10,7 @@ import threading
 import time
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -99,13 +100,64 @@ def test_retention_removes_only_designated_old_backups(tmp_path):
     corrupt = backup_dir / f"{BACKUP_PREFIX}corrupt{BACKUP_SUFFIX}"
     corrupt.write_text("not sqlite", encoding="utf-8")
 
-    removed = prune_backups(backup_dir, retain_count=2)
+    removed = prune_backups(
+        backup_dir,
+        source_db=tmp_path / "pilot.db",
+        retain_count=2,
+    )
 
     assert {path.name for path in removed} == {candidates[0].name, candidates[1].name}
     assert unrelated.read_text(encoding="utf-8") == "preserve"
     assert partial.read_text(encoding="utf-8") == "preserve"
     assert corrupt.read_text(encoding="utf-8") == "not sqlite"
     assert candidates[2].exists() and candidates[3].exists()
+
+
+def test_retention_for_one_database_cannot_delete_other_database_backups(tmp_path):
+    backup_dir = tmp_path / "shared-backups"
+    backup_dir.mkdir()
+    pilot_db = tmp_path / "pilot.db"
+    dbmod.init_db(pilot_db)
+
+    def make_verified_backup(stem, timestamp, modified_at):
+        path = backup_dir / f"{BACKUP_PREFIX}{stem}-{timestamp}{BACKUP_SUFFIX}"
+        with sqlite3.connect(path) as conn:
+            conn.execute("CREATE TABLE marker (source_stem TEXT NOT NULL)")
+            conn.execute("INSERT INTO marker VALUES (?)", (stem,))
+        os.utime(path, (modified_at, modified_at))
+        return path
+
+    pilot_backups = [
+        make_verified_backup("pilot", f"2026082{index}T000000.000000Z", index + 10)
+        for index in range(4)
+    ]
+    acceptance_backups = [
+        make_verified_backup("acceptance", f"2026082{index}T010000.000000Z", index + 1)
+        for index in range(3)
+    ]
+    acceptance_before = {
+        path.name: _sha256(path)
+        for path in acceptance_backups
+    }
+
+    result = create_backup(
+        pilot_db,
+        backup_dir,
+        retain_count=2,
+        now=NOW,
+    )
+
+    assert {Path(path).name for path in result["pruned_paths"]} == {
+        pilot_backups[0].name,
+        pilot_backups[1].name,
+        pilot_backups[2].name,
+    }
+    assert pilot_backups[3].exists()
+    assert Path(result["backup_path"]).exists()
+    assert {
+        path.name: _sha256(path)
+        for path in acceptance_backups
+    } == acceptance_before
 
 
 def test_service_instance_lock_rejects_second_process_owner(tmp_db_path):

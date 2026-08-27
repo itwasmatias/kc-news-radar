@@ -36,9 +36,21 @@ def _quick_check(conn: sqlite3.Connection) -> str:
     return "ok" if rows == ["ok"] else "; ".join(rows)
 
 
-def _backup_files(backup_dir: Path) -> list[Path]:
+def _safe_backup_stem(source_db: Path) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "-", source_db.stem).strip("-.") or "database"
+
+
+def _backup_files(backup_dir: Path, *, source_stem: str | None = None) -> list[Path]:
     if not backup_dir.is_dir():
         return []
+    source_pattern = (
+        re.compile(
+            rf"^{re.escape(BACKUP_PREFIX)}{re.escape(source_stem)}-"
+            rf"\d{{8}}T\d{{6}}(?:\.\d{{6}})?Z{re.escape(BACKUP_SUFFIX)}$"
+        )
+        if source_stem is not None
+        else None
+    )
     return sorted(
         (
             entry
@@ -47,6 +59,7 @@ def _backup_files(backup_dir: Path) -> list[Path]:
             and not entry.is_symlink()
             and entry.name.startswith(BACKUP_PREFIX)
             and entry.name.endswith(BACKUP_SUFFIX)
+            and (source_pattern is None or source_pattern.fullmatch(entry.name))
             and _verified_backup_file(entry)
         ),
         key=lambda entry: (entry.stat().st_mtime_ns, entry.name),
@@ -62,13 +75,19 @@ def _verified_backup_file(path: Path) -> bool:
         return False
 
 
-def prune_backups(backup_dir: Path, *, retain_count: int) -> list[Path]:
-    """Delete only older Radar backup files inside one resolved directory."""
+def prune_backups(
+    backup_dir: Path,
+    *,
+    source_db: Path,
+    retain_count: int,
+) -> list[Path]:
+    """Delete only older verified backups belonging to one source database."""
     if retain_count < 1:
         raise ValueError("retain_count must be at least 1")
     resolved_dir = backup_dir.resolve()
+    source_stem = _safe_backup_stem(source_db)
     removed: list[Path] = []
-    for candidate in _backup_files(resolved_dir)[retain_count:]:
+    for candidate in _backup_files(resolved_dir, source_stem=source_stem)[retain_count:]:
         if candidate.parent.resolve() != resolved_dir:
             raise RuntimeError(f"refusing retention outside backup directory: {candidate}")
         candidate.unlink()
@@ -105,7 +124,7 @@ def create_backup(
         raise FileNotFoundError(f"source database does not exist: {source_db}")
     backup_dir.mkdir(parents=True, exist_ok=True)
     now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
-    safe_stem = re.sub(r"[^A-Za-z0-9_.-]+", "-", source_db.stem).strip("-.") or "database"
+    safe_stem = _safe_backup_stem(source_db)
     stamp = now.strftime("%Y%m%dT%H%M%S.%fZ")
     destination = backup_dir / f"{BACKUP_PREFIX}{safe_stem}-{stamp}{BACKUP_SUFFIX}"
     partial = destination.with_suffix(destination.suffix + ".partial")
@@ -133,7 +152,11 @@ def create_backup(
             destination.unlink()
         raise
 
-    removed = prune_backups(backup_dir, retain_count=retain_count)
+    removed = prune_backups(
+        backup_dir,
+        source_db=source_db,
+        retain_count=retain_count,
+    )
     log.info("SQLite backup succeeded source=%s destination=%s", source_db, destination)
     return {
         "ok": True,
