@@ -66,6 +66,18 @@ public-signal profile shifts, a new version is appended. This means:
 - Resolutions live in a separate table and never touch the forecast row.
 - Explanation JSON is stored with each version, so the "why" travels with
   the score.
+- Each newly issued version snapshots the persisted signals and public-source
+  records that supported it. Current upstream content is never substituted for
+  missing historical evidence.
+
+## Outcome summaries are descriptive
+
+The Validation view includes only forecasts with a recorded, version-targeted
+outcome. It shows counts and denominators by outcome, model version, and signal
+type. These summaries do not establish calibration, statistical significance,
+causation, or superiority over another scoring model. A small or selectively
+resolved sample can be misleading; fewer than five resolved forecasts is
+explicitly labeled insufficient for stable interpretation.
 
 ## When to disable a signal
 

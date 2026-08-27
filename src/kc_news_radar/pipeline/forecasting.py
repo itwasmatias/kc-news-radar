@@ -174,14 +174,17 @@ def run_pipeline(
     dbmod.clear_signals(conn)
     detected = detect_signals(items, now=now)
 
-    # Persist signals.
+    # Persist signals and retain their concrete IDs for immutable forecast
+    # evidence snapshots. Current signal rows are recomputed on the next run.
     signals_written = 0
+    persisted_signal_ids: dict[int, int] = {}
     for det in detected:
         weight = 1
         evidence_triples = [
             (eid, det.signal.signal_type.value, weight) for eid in det.evidence_ids
         ]
-        dbmod.insert_signal(conn, det.signal, evidence_triples)
+        signal_id = dbmod.insert_signal(conn, det.signal, evidence_triples)
+        persisted_signal_ids[id(det)] = signal_id
         signals_written += 1
 
     # Signal types that meaningfully imply a "development to forecast".
@@ -213,10 +216,12 @@ def run_pipeline(
                     "evidence_ids": set(),
                     "sources": set(),
                     "sample_signal": det.signal,
+                    "detected_signals": [],
                 },
             )
             slot["signal_types"].add(det.signal.signal_type)
             slot["evidence_ids"].update(det.evidence_ids)
+            slot["detected_signals"].append(det)
             for e in det.evidence_ids:
                 if e in item_by_id:
                     slot["sources"].add(item_by_id[e]["source_name"])
@@ -343,7 +348,28 @@ def run_pipeline(
                 "notes": "Experimental score — not a calibrated probability.",
             },
         )
-        upsert_forecast_version(conn, forecast)
+        latest_before = dbmod.latest_forecast_version(conn, fid)
+        stored = upsert_forecast_version(conn, forecast)
+        if stored.version > latest_before:
+            # Snapshot every contributing persisted signal and its actual
+            # source records. Never reconstruct this from a later pipeline run.
+            seen_pairs: set[tuple[int, int]] = set()
+            for det in slot["detected_signals"]:
+                signal_id = persisted_signal_ids[id(det)]
+                for evidence_id in det.evidence_ids:
+                    pair = (signal_id, evidence_id)
+                    if pair in seen_pairs or evidence_id not in item_by_id:
+                        continue
+                    seen_pairs.add(pair)
+                    dbmod.insert_forecast_evidence_snapshot(
+                        conn,
+                        forecast_id=stored.forecast_id,
+                        forecast_version=stored.version,
+                        signal_id=signal_id,
+                        signal=det.signal,
+                        source_item=item_by_id[evidence_id],
+                        relationship=det.signal.signal_type.value,
+                    )
         forecasts_written += 1
 
     conn.commit()

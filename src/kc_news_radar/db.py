@@ -107,12 +107,60 @@ CREATE TABLE IF NOT EXISTS forecasts (
 CREATE INDEX IF NOT EXISTS idx_forecasts_status ON forecasts(status);
 CREATE INDEX IF NOT EXISTS idx_forecasts_issued ON forecasts(issued_at);
 
+-- Immutable historical provenance captured when a forecast version is issued.
+-- signal_id/source_item_id are provenance labels, not foreign keys: current
+-- signals are recomputed and source_items can change after issuance.
+CREATE TABLE IF NOT EXISTS forecast_evidence_snapshots (
+    forecast_id TEXT NOT NULL,
+    forecast_version INTEGER NOT NULL,
+    signal_id INTEGER NOT NULL,
+    signal_type TEXT NOT NULL,
+    signal_title TEXT NOT NULL,
+    signal_summary TEXT NOT NULL,
+    signal_created_at TEXT NOT NULL,
+    signal_novelty_score INTEGER NOT NULL,
+    signal_local_impact_score INTEGER NOT NULL,
+    source_item_id INTEGER NOT NULL,
+    relationship TEXT NOT NULL,
+    evidence_weight INTEGER NOT NULL DEFAULT 1,
+    source_name TEXT NOT NULL,
+    external_id TEXT NOT NULL,
+    canonical_url TEXT,
+    item_title TEXT NOT NULL,
+    item_excerpt TEXT,
+    published_at TEXT,
+    event_at TEXT,
+    retrieved_at TEXT NOT NULL,
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    geography TEXT,
+    beat TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    public_metadata_json TEXT NOT NULL,
+    PRIMARY KEY (forecast_id, forecast_version, signal_id, source_item_id),
+    FOREIGN KEY (forecast_id, forecast_version)
+        REFERENCES forecasts(forecast_id, version)
+);
+CREATE INDEX IF NOT EXISTS idx_forecast_evidence_lookup
+    ON forecast_evidence_snapshots(forecast_id, forecast_version);
+
 CREATE TABLE IF NOT EXISTS resolutions (
     forecast_id TEXT PRIMARY KEY,
     resolved_at TEXT NOT NULL,
     outcome TEXT NOT NULL,
     evidence TEXT NOT NULL,
     notes TEXT
+);
+
+-- Adds explicit version targeting without destructively changing the existing
+-- resolution table. New resolutions are written to both tables atomically.
+CREATE TABLE IF NOT EXISTS resolution_targets (
+    forecast_id TEXT PRIMARY KEY,
+    forecast_version INTEGER NOT NULL,
+    recorded_at TEXT NOT NULL,
+    FOREIGN KEY (forecast_id, forecast_version)
+        REFERENCES forecasts(forecast_id, version),
+    FOREIGN KEY (forecast_id) REFERENCES resolutions(forecast_id)
 );
 
 CREATE TABLE IF NOT EXISTS feedback (
@@ -433,6 +481,16 @@ def get_forecast_versions(conn: sqlite3.Connection, forecast_id: str) -> list[di
     return [_forecast_row(r) for r in rows]
 
 
+def get_forecast_version(
+    conn: sqlite3.Connection, forecast_id: str, version: int
+) -> dict[str, Any] | None:
+    row = conn.execute(
+        "SELECT * FROM forecasts WHERE forecast_id=? AND version=?",
+        (forecast_id, version),
+    ).fetchone()
+    return _forecast_row(row) if row else None
+
+
 def _forecast_row(row: sqlite3.Row) -> dict[str, Any]:
     d = dict(row)
     d["explanation"] = json.loads(d.pop("explanation_json") or "{}")
@@ -440,19 +498,109 @@ def _forecast_row(row: sqlite3.Row) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# immutable forecast evidence snapshots
+# ---------------------------------------------------------------------------
+
+def insert_forecast_evidence_snapshot(
+    conn: sqlite3.Connection,
+    *,
+    forecast_id: str,
+    forecast_version: int,
+    signal_id: int,
+    signal: Signal,
+    source_item: dict[str, Any],
+    relationship: str,
+    evidence_weight: int = 1,
+) -> None:
+    """Capture the evidence exactly as persisted when a version is issued."""
+    metadata = {
+        key: value
+        for key, value in (source_item.get("metadata") or {}).items()
+        if not key.endswith("_private")
+    }
+    conn.execute(
+        """
+        INSERT INTO forecast_evidence_snapshots (
+            forecast_id, forecast_version, signal_id, signal_type,
+            signal_title, signal_summary, signal_created_at,
+            signal_novelty_score, signal_local_impact_score,
+            source_item_id, relationship, evidence_weight, source_name,
+            external_id, canonical_url, item_title, item_excerpt,
+            published_at, event_at, retrieved_at, first_seen_at, last_seen_at,
+            geography, beat, content_hash, public_metadata_json
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """,
+        (
+            forecast_id,
+            forecast_version,
+            signal_id,
+            signal.signal_type.value,
+            signal.title,
+            signal.summary,
+            _iso(signal.created_at),
+            signal.novelty_score,
+            signal.local_impact_score,
+            source_item["id"],
+            relationship,
+            evidence_weight,
+            source_item["source_name"],
+            source_item["external_id"],
+            source_item.get("canonical_url"),
+            source_item["title"],
+            source_item.get("excerpt"),
+            source_item.get("published_at"),
+            source_item.get("event_at"),
+            source_item["retrieved_at"],
+            source_item["first_seen_at"],
+            source_item["last_seen_at"],
+            source_item.get("geography"),
+            source_item["beat"],
+            source_item["content_hash"],
+            json.dumps(metadata, sort_keys=True, default=str),
+        ),
+    )
+
+
+def get_forecast_evidence(
+    conn: sqlite3.Connection, forecast_id: str, forecast_version: int
+) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        """
+        SELECT * FROM forecast_evidence_snapshots
+        WHERE forecast_id=? AND forecast_version=?
+        ORDER BY signal_type, signal_id, source_name, external_id
+        """,
+        (forecast_id, forecast_version),
+    ).fetchall()
+    result = []
+    for row in rows:
+        item = dict(row)
+        item["public_metadata"] = json.loads(item.pop("public_metadata_json") or "{}")
+        result.append(item)
+    return result
+
+
+# ---------------------------------------------------------------------------
 # resolutions
 # ---------------------------------------------------------------------------
 
 def insert_resolution(conn: sqlite3.Connection, resolution: Resolution) -> None:
+    version = get_forecast_version(conn, resolution.forecast_id, resolution.forecast_version)
+    if version is None:
+        raise ValueError(
+            f"unknown forecast {resolution.forecast_id!r} version {resolution.forecast_version}"
+        )
+    latest = latest_forecast_version(conn, resolution.forecast_id)
+    if resolution.forecast_version != latest:
+        raise ValueError(
+            f"forecast version {resolution.forecast_version} is not the latest version {latest}"
+        )
+    if get_resolution(conn, resolution.forecast_id) is not None:
+        raise ValueError(f"forecast {resolution.forecast_id!r} is already resolved")
     conn.execute(
         """
         INSERT INTO resolutions (forecast_id, resolved_at, outcome, evidence, notes)
         VALUES (?,?,?,?,?)
-        ON CONFLICT(forecast_id) DO UPDATE SET
-            resolved_at=excluded.resolved_at,
-            outcome=excluded.outcome,
-            evidence=excluded.evidence,
-            notes=excluded.notes
         """,
         (
             resolution.forecast_id,
@@ -462,17 +610,41 @@ def insert_resolution(conn: sqlite3.Connection, resolution: Resolution) -> None:
             resolution.notes,
         ),
     )
+    conn.execute(
+        """
+        INSERT INTO resolution_targets (forecast_id, forecast_version, recorded_at)
+        VALUES (?,?,?)
+        """,
+        (
+            resolution.forecast_id,
+            resolution.forecast_version,
+            _iso(resolution.resolved_at),
+        ),
+    )
 
 
 def get_resolution(conn: sqlite3.Connection, forecast_id: str) -> dict[str, Any] | None:
     row = conn.execute(
-        "SELECT * FROM resolutions WHERE forecast_id=?", (forecast_id,)
+        """
+        SELECT r.*, t.forecast_version
+        FROM resolutions r
+        LEFT JOIN resolution_targets t ON t.forecast_id = r.forecast_id
+        WHERE r.forecast_id=?
+        """,
+        (forecast_id,),
     ).fetchone()
     return dict(row) if row else None
 
 
 def list_resolutions(conn: sqlite3.Connection) -> list[dict[str, Any]]:
-    rows = conn.execute("SELECT * FROM resolutions ORDER BY resolved_at DESC").fetchall()
+    rows = conn.execute(
+        """
+        SELECT r.*, t.forecast_version
+        FROM resolutions r
+        LEFT JOIN resolution_targets t ON t.forecast_id = r.forecast_id
+        ORDER BY r.resolved_at DESC
+        """
+    ).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -489,3 +661,21 @@ def insert_feedback(
         (subject_type, subject_id, label, note, now),
     )
     return int(cur.lastrowid)
+
+
+def list_feedback(
+    conn: sqlite3.Connection, *, subject_type: str | None = None, subject_id: str | None = None
+) -> list[dict[str, Any]]:
+    clauses: list[str] = []
+    params: list[Any] = []
+    if subject_type is not None:
+        clauses.append("subject_type=?")
+        params.append(subject_type)
+    if subject_id is not None:
+        clauses.append("subject_id=?")
+        params.append(subject_id)
+    where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+    rows = conn.execute(
+        f"SELECT * FROM feedback{where} ORDER BY created_at DESC", params
+    ).fetchall()
+    return [dict(row) for row in rows]

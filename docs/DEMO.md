@@ -11,10 +11,10 @@ cannot be mistaken for a real public-source item.
 
 ```bash
 # Set the demo flag and collect. This wipes the DB and inserts fixtures.
-KC_NEWS_RADAR_DEMO=1 kc-news-radar-collect
+KC_NEWS_RADAR_DB=./data/demo.db KC_NEWS_RADAR_DEMO=1 kc-news-radar-collect
 
 # Start the dashboard.
-kc-news-radar-serve
+KC_NEWS_RADAR_DB=./data/demo.db kc-news-radar-serve
 # → open http://127.0.0.1:8765
 ```
 
@@ -55,8 +55,10 @@ that matters:
 
 ## Resetting
 
-Demo mode wipes `source_items`, `source_health`, `signals`,
-`signal_evidence`, `forecasts`, and `resolutions` before it inserts. If
+Demo mode wipes the selected database's `source_items`, `source_health`,
+`signals`, `signal_evidence`, `forecasts`, evidence snapshots, `resolutions`,
+and feedback before it inserts. It never searches for or modifies other local
+database files. If
 you switch back to live mode later, delete or move the DB file first if
 you want a clean slate:
 

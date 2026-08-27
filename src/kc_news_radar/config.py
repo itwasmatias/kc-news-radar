@@ -34,6 +34,7 @@ def _bool_env(key: str, default: bool = False) -> bool:
 @dataclass(frozen=True)
 class Settings:
     db_path: Path
+    db_path_explicit: bool
     demo_mode: bool
     host: str
     port: int
@@ -42,9 +43,11 @@ class Settings:
 
 
 def load_settings() -> Settings:
-    db_path = Path(os.environ.get("KC_NEWS_RADAR_DB", str(DEFAULT_DB_PATH)))
+    configured_db = os.environ.get("KC_NEWS_RADAR_DB")
+    db_path = Path(configured_db) if configured_db else DEFAULT_DB_PATH
     return Settings(
-        db_path=db_path,
+        db_path=db_path.resolve(),
+        db_path_explicit=configured_db is not None,
         demo_mode=_bool_env("KC_NEWS_RADAR_DEMO", False),
         host=os.environ.get("KC_NEWS_RADAR_HOST", "127.0.0.1"),
         port=int(os.environ.get("KC_NEWS_RADAR_PORT", "8765")),

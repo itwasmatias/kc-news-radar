@@ -106,6 +106,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     settings = load_settings()
+    selection = "explicit KC_NEWS_RADAR_DB" if settings.db_path_explicit else "default path"
+    print(f"database ({selection}): {settings.db_path}", flush=True)
     if settings.demo_mode:
         _run_demo()
         return 0

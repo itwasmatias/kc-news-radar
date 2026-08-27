@@ -140,6 +140,7 @@ class Resolution(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     forecast_id: str
+    forecast_version: int = Field(ge=1)
     resolved_at: datetime
     outcome: Outcome
     evidence: str

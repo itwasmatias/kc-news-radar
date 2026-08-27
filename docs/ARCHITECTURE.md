@@ -18,7 +18,7 @@ src/kc_news_radar/
 │   ├── nws.py, nws_afd.py
 │   ├── usgs.py
 │   ├── mo_house.py
-│   └── ridekc.py, flykc.py, jackson_county.py   # intentional-failure adapters
+│   └── ridekc.py, flykc.py, jackson_county.py   # repaired live public interfaces
 ├── pipeline/
 │   ├── normalize.py     # text normalization + Jaccard helpers
 │   ├── dedupe.py        # near-duplicate grouping by title similarity
@@ -29,6 +29,7 @@ src/kc_news_radar/
 ├── ledger/
 │   ├── forecasts.py     # append-only versioning + material-delta gating
 │   └── resolution.py    # forecast resolutions + display-time status
+├── performance.py       # descriptive outcome counts from resolved forecasts
 └── web/                 # static HTML/JS/CSS dashboard
 ```
 
@@ -67,9 +68,16 @@ plain Python dicts and does not require network access.
   A new version is written only when the underlying likelihood or relevance
   changes by at least `MATERIAL_SCORE_DELTA` (5 points). Prior rows are
   never mutated — `insert_forecast` raises if you try.
+- **`forecast_evidence_snapshots`** — immutable signal and public-source
+  snapshots captured only when a new forecast version is appended. IDs remain
+  provenance labels rather than live foreign-key joins because signals are
+  recomputed and source rows can later change. Private metadata keys are not
+  copied into the dashboard-visible snapshot.
 - **`resolutions`** — one row per forecast recording an outcome
   (`CONFIRMED | NOT_OCCURRED | AMBIGUOUS | EXPIRED_UNRESOLVED`). Never
   modifies the forecast row itself.
+- **`resolution_targets`** — the exact forecast version resolved. New
+  resolutions are single-assignment and target the latest persisted version.
 - **`feedback`** — newsroom-manager reactions on items/signals/forecasts.
 
 Timestamps are stored as ISO-8601 UTC strings; the DB layer refuses naive
@@ -107,3 +115,8 @@ The forecast ledger is the compliance backbone. `ledger.forecasts`:
 - Otherwise makes no change.
 - Never rewrites history. If someone tries to insert an existing
   `(forecast_id, version)`, `db.insert_forecast` raises `ValueError`.
+
+Evidence snapshots and resolutions follow the same rule: a new forecast
+version receives its own evidence snapshot, and an outcome is stored beside—not
+inside—the forecast. Legacy forecasts without snapshots return an explicit
+`LEGACY_NOT_CAPTURED` boundary instead of a join to mutable current content.

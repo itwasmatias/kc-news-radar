@@ -27,12 +27,15 @@ def _now() -> datetime:
 
 def load_demo_fixtures(conn: sqlite3.Connection) -> None:
     """Wipe collector state and insert a small, deterministic synthetic set."""
+    conn.execute("DELETE FROM resolution_targets")
+    conn.execute("DELETE FROM resolutions")
+    conn.execute("DELETE FROM feedback")
+    conn.execute("DELETE FROM forecast_evidence_snapshots")
+    conn.execute("DELETE FROM forecasts")
     conn.execute("DELETE FROM signal_evidence")
     conn.execute("DELETE FROM signals")
     conn.execute("DELETE FROM source_items")
     conn.execute("DELETE FROM source_health")
-    conn.execute("DELETE FROM resolutions")
-    conn.execute("DELETE FROM forecasts")
     conn.commit()
 
     now = _now()

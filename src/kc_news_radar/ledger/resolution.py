@@ -17,11 +17,15 @@ def record_resolution(
     evidence: str,
     notes: str | None = None,
     resolved_at: datetime | None = None,
+    forecast_version: int | None = None,
 ) -> Resolution:
     """Persist a resolution row. Original forecast rows are untouched."""
     resolved_at = resolved_at or datetime.now(timezone.utc)
+    if forecast_version is None:
+        forecast_version = dbmod.latest_forecast_version(conn, forecast_id)
     r = Resolution(
         forecast_id=forecast_id,
+        forecast_version=forecast_version,
         resolved_at=resolved_at,
         outcome=outcome,
         evidence=evidence,

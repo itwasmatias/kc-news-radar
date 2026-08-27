@@ -17,8 +17,8 @@ of information gathering ahead of the daily editorial meeting.
 
 1. **Collects** normalized items from a small set of public data sources
    (KCMO 311 open-data, Johnson County news, NWS alerts, USGS earthquakes,
-   Missouri House bills, and NWS forecast discussions — plus a few
-   intentionally-failing adapters kept visible so source failure is honest).
+   Missouri House bills, NWS forecast discussions, KCMO and Jackson County
+   Legistar records, RideKC alerts, and FlyKC aviation publications).
 2. **Detects deterministic signals** — new items, updated items, scheduled
    catalysts, severe weather, unusual agenda items, multi-source convergence,
    repeated entity activity, high-impact public safety, 311 community
@@ -33,6 +33,10 @@ of information gathering ahead of the daily editorial meeting.
    Strategy Brief (`NEW`, `CHANGED`, `RESOLVED`, `WATCH`, `NEXT 72H`,
    `QUESTIONS`), with a Beat Momentum overview and secondary tabs for
    signals, the forecast ledger, and source health.
+6. **Closes the validation loop** by preserving the signal and public-source
+   evidence captured for each new forecast version, accepting constrained
+   newsroom feedback, recording one version-targeted outcome without changing
+   the forecast, and reporting descriptive resolved-outcome counts.
 
 ---
 
@@ -43,9 +47,9 @@ python -m venv .venv
 . .venv/bin/activate
 pip install -e '.[dev]'
 
-# Try it with deterministic synthetic data (no network needed):
-KC_NEWS_RADAR_DEMO=1 kc-news-radar-collect
-kc-news-radar-serve  # opens on http://127.0.0.1:8765
+# Try it with deterministic synthetic data (no network needed) in a named DB:
+KC_NEWS_RADAR_DB=./data/demo.db KC_NEWS_RADAR_DEMO=1 kc-news-radar-collect
+KC_NEWS_RADAR_DB=./data/demo.db kc-news-radar-serve  # http://127.0.0.1:8765
 ```
 
 Every demo record is prefixed `[DEMO DATA]` so you can never confuse it with
@@ -54,10 +58,10 @@ a real public-source item.
 To run against live public sources instead:
 
 ```bash
-kc-news-radar-collect            # collect from all adapters
+KC_NEWS_RADAR_DB=./data/live.db kc-news-radar-collect
 kc-news-radar-collect --list     # list adapters
-kc-news-radar-collect --source nws_kc --verbose
-kc-news-radar-serve
+KC_NEWS_RADAR_DB=./data/live.db kc-news-radar-collect --source nws_kc --verbose
+KC_NEWS_RADAR_DB=./data/live.db kc-news-radar-serve
 ```
 
 ---
@@ -85,8 +89,36 @@ Environment variables (all optional):
 | `KC_NEWS_RADAR_TIMEOUT`     | `15.0`                           | Per-request HTTP timeout (seconds)   |
 | `KC_NEWS_RADAR_USER_AGENT`  | `KCNewsRadar/0.1 (…)`            | User-Agent for all outbound HTTP     |
 
-The database file is created on first use. Reopening it later preserves
-every source item, signal, forecast version, and resolution.
+The database file is created on first use. Reopening it later preserves every
+source item, signal, forecast version, evidence snapshot, resolution, and
+feedback record. The default remains `data/kc_news_radar.db`, but startup
+prints whether selection was explicit and the dashboard warns when the default,
+stale collection evidence, or source-configuration drift is detected. For a
+review or demonstration, always set `KC_NEWS_RADAR_DB` to the exact snapshot
+you intend to inspect. Local database files are ignored and are never selected
+by filename heuristics.
+
+## Closed-loop editorial validation
+
+Open **Forecast Ledger** and select a forecast claim. The detail workspace
+shows the exact signal and source-record snapshots captured when the displayed
+forecast version was issued. It never fills a historical gap with current
+upstream content. Older ledger rows created before snapshot support say that
+evidence is unavailable.
+
+The same workspace accepts a constrained editorial feedback label and optional
+note. An unresolved forecast can receive one outcome targeted at its displayed
+latest version, with supporting evidence and optional notes. Resolution is
+single-assignment: it creates a separate resolution record and never updates
+the immutable forecast row.
+
+The **Validation** tab reports resolved sample counts by outcome, scoring-model
+version, and contributing signal type. Every view includes its denominator.
+These are descriptive counts from recorded outcomes—not probabilities,
+calibration, statistical significance, or evidence that one model is better.
+With fewer than five resolved forecasts, the product explicitly labels the
+sample insufficient for stable interpretation. See
+`docs/VALIDATION_WORKFLOW.md` for the full evidence and safety contract.
 
 ---
 
@@ -96,6 +128,7 @@ every source item, signal, forecast version, and resolution.
 - `docs/DATA_SOURCES.md` — Tier-1 adapters, source URLs, and known failure modes
 - `docs/EDITORIAL_SAFETY.md` — what the scores mean and, critically, don't
 - `docs/DEMO.md` — running the demo without network access
+- `docs/VALIDATION_WORKFLOW.md` — evidence, feedback, outcomes, and performance
 
 ---
 

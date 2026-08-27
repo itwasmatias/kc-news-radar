@@ -35,6 +35,17 @@ async function fetchJSON(url) {
   return r.json();
 }
 
+async function postJSON(url, payload) {
+  const r = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body.detail || `${url} -> ${r.status}`);
+  return body;
+}
+
 function scoreBar(score, label) {
   const pct = Math.max(0, Math.min(100, score || 0));
   return `<div class="score">
@@ -145,7 +156,7 @@ function ledgerRow(f) {
   const outcome = f.resolution ? f.resolution.outcome : "";
   return `<tr>
     <td>${esc(fmtDate(f.issued_at))}</td>
-    <td>${esc(f.claim)}</td>
+    <td><button class="link-button forecast-open" data-forecast-id="${esc(f.forecast_id)}">${esc(f.claim)}</button></td>
     <td>${f.likelihood_score}</td>
     <td>${f.editorial_relevance_score}</td>
     <td>${f.priority_score}</td>
@@ -156,14 +167,108 @@ function ledgerRow(f) {
   </tr>`;
 }
 
+function evidenceSignal(signal) {
+  const records = signal.source_records.map(item => `<article class="evidence-record">
+    <div><strong>${esc(item.source_name)}</strong> · observed ${esc(fmtDate(item.retrieved_at))}</div>
+    <div class="card__title">${esc(item.title)}</div>
+    <div class="card__body">${esc(item.excerpt || "No excerpt supplied by source.")}</div>
+    <div class="evidence-meta">First seen ${esc(fmtDate(item.first_seen_at))} · last seen ${esc(fmtDate(item.last_seen_at))} · content hash ${esc(item.content_hash)}</div>
+    ${item.canonical_url ? `<a href="${esc(item.canonical_url)}" target="_blank" rel="noopener">Open public source record</a>` : `<span class="dim">No canonical URL supplied.</span>`}
+  </article>`).join("");
+  return `<section class="evidence-signal">
+    <h3>${esc(signal.signal_type)} — ${esc(signal.title)}</h3>
+    <p>${esc(signal.summary)}</p>
+    <div class="card__chips"><span class="chip">Novelty ${signal.novelty_score}</span><span class="chip">Impact ${signal.local_impact_score}</span></div>
+    ${records}
+  </section>`;
+}
+
+async function openForecast(forecastId) {
+  const root = $("forecastDetail");
+  root.hidden = false;
+  root.innerHTML = "<div class='empty'>Loading forecast evidence…</div>";
+  root.scrollIntoView({ behavior: "smooth", block: "start" });
+  try {
+    const detail = await fetchJSON(`/api/forecasts/${encodeURIComponent(forecastId)}`);
+    const f = detail.latest;
+    const limitations = detail.evidence_limitations.map(x => `<li>${esc(x)}</li>`).join("");
+    const evidence = detail.supporting_evidence.length
+      ? detail.supporting_evidence.map(evidenceSignal).join("")
+      : `<div class="callout callout--warn">Historical evidence unavailable. Current source content has not been substituted.</div>`;
+    const feedbackHistory = detail.editorial_feedback.length
+      ? detail.editorial_feedback.map(x => `<li>${esc(x.label)} · ${esc(fmtDate(x.created_at))}${x.note ? ` — ${esc(x.note)}` : ""}</li>`).join("")
+      : "<li>No feedback recorded.</li>";
+    const resolution = detail.resolution;
+    const resolutionBlock = resolution
+      ? `<div class="callout"><strong>Outcome: ${esc(resolution.outcome)}</strong> for forecast v${esc(resolution.forecast_version)}<br>Recorded ${esc(fmtDate(resolution.resolved_at))}<br>Evidence: ${esc(resolution.evidence)}${resolution.notes ? `<br>Notes: ${esc(resolution.notes)}` : ""}<br><span class="dim">The original forecast remains immutable.</span></div>`
+      : `<form id="resolutionForm" class="compact-form">
+          <h3>Record outcome for forecast v${f.version}</h3>
+          <label>Outcome<select name="outcome" required>
+            <option value="">Choose…</option><option>CONFIRMED</option><option>NOT_OCCURRED</option><option>AMBIGUOUS</option><option>EXPIRED_UNRESOLVED</option>
+          </select></label>
+          <label>Supporting evidence<textarea name="evidence" maxlength="2000" required placeholder="Public record, published report, or concise explanation"></textarea></label>
+          <label>Notes (optional)<textarea name="notes" maxlength="1000"></textarea></label>
+          <button type="submit">Record immutable outcome</button><span class="form-status" id="resolutionStatus"></span>
+        </form>`;
+    root.innerHTML = `<div class="detail-head"><div><h2>${esc(f.claim)}</h2><div class="card__chips"><span class="chip">Forecast v${f.version}</span><span class="chip">${esc(detail.evidence_status)}</span><span class="chip">Model ${esc(f.model_version)}</span></div></div><button id="closeDetail" class="secondary-button">Close</button></div>
+      <p class="scientific-note">Experimental score — not a calibrated probability.</p>
+      <h2>Supporting public evidence captured at issuance</h2>${evidence}
+      <h3>Evidence boundaries</h3><ul>${limitations}</ul>
+      <div class="workflow-grid"><form id="feedbackForm" class="compact-form">
+        <h3>Editorial feedback</h3>
+        <label>Structured label<select name="label" required><option value="">Choose…</option><option>USEFUL</option><option>NOT_USEFUL</option><option>ALREADY_KNEW</option><option>WATCH</option><option>ASSIGNED_REPORTER</option><option>NOT_NEWSWORTHY</option><option>INCORRECT</option></select></label>
+        <label>Note (optional)<textarea name="note" maxlength="400"></textarea></label>
+        <button type="submit">Save feedback</button><span class="form-status" id="feedbackStatus"></span>
+        <h4>Recorded feedback</h4><ul>${feedbackHistory}</ul>
+      </form>${resolutionBlock}</div>`;
+    $("closeDetail").addEventListener("click", () => { root.hidden = true; });
+    $("feedbackForm").addEventListener("submit", async event => {
+      event.preventDefault();
+      const form = new FormData(event.currentTarget);
+      const status = $("feedbackStatus");
+      try {
+        await postJSON("/api/feedback", { subject_type: "forecast", subject_id: forecastId, label: form.get("label"), note: form.get("note") || null });
+        status.textContent = "Saved.";
+        await openForecast(forecastId);
+      } catch (e) { status.textContent = e.message; }
+    });
+    if ($("resolutionForm")) $("resolutionForm").addEventListener("submit", async event => {
+      event.preventDefault();
+      const form = new FormData(event.currentTarget);
+      const status = $("resolutionStatus");
+      try {
+        await postJSON(`/api/forecasts/${encodeURIComponent(forecastId)}/resolution`, {
+          forecast_version: f.version, outcome: form.get("outcome"), evidence: form.get("evidence"), notes: form.get("notes") || null,
+        });
+        status.textContent = "Outcome recorded.";
+        await loadAll();
+        await openForecast(forecastId);
+      } catch (e) { status.textContent = e.message; }
+    });
+  } catch (e) { root.innerHTML = `<div class="callout callout--warn">${esc(e.message)}</div>`; }
+}
+
+function renderPerformance(performance) {
+  const outcomeRows = performance.by_outcome.map(r => `<tr><td>${esc(r.outcome)}</td><td>${r.resolved_count}</td><td>${r.denominator}</td></tr>`).join("");
+  const modelRows = performance.by_model_version.map(r => `<tr><td>${esc(r.model_version)}</td><td>${r.resolved_count}</td><td>${r.overall_resolved_denominator}</td><td>${esc(JSON.stringify(r.outcomes))}</td></tr>`).join("");
+  const signalRows = performance.by_signal_type.map(r => `<tr><td>${esc(r.signal_type)}</td><td>${r.resolved_count}</td><td>${r.overall_resolved_denominator}</td><td>${esc(JSON.stringify(r.outcomes))}</td></tr>`).join("");
+  return `<div class="callout ${performance.sufficient_resolved_evidence ? "" : "callout--warn"}">${esc(performance.evidence_note)}</div>
+    <p>Resolved denominator: <strong>${performance.denominator}</strong>. Legacy outcomes lacking an explicit forecast version and excluded: <strong>${performance.excluded_legacy_resolutions_without_version}</strong>.</p>
+    <div class="grid-3"><div><h2>By outcome</h2><table class="table"><thead><tr><th>Outcome</th><th>Count</th><th>Denominator</th></tr></thead><tbody>${outcomeRows || "<tr><td colspan='3'>No resolved forecasts.</td></tr>"}</tbody></table></div>
+    <div><h2>By model version</h2><table class="table"><thead><tr><th>Model</th><th>Count</th><th>Overall denominator</th><th>Outcomes</th></tr></thead><tbody>${modelRows || "<tr><td colspan='4'>No resolved forecasts.</td></tr>"}</tbody></table></div>
+    <div><h2>By signal type</h2><table class="table"><thead><tr><th>Signal</th><th>Count</th><th>Overall denominator</th><th>Outcomes</th></tr></thead><tbody>${signalRows || "<tr><td colspan='4'>No resolved forecasts.</td></tr>"}</tbody></table></div></div>
+    <p class="scientific-note">${esc(performance.scientific_note)}</p>`;
+}
+
 async function loadAll() {
   try {
-    const [brief, sources, forecasts, signals, health] = await Promise.all([
+    const [brief, sources, forecasts, signals, health, performance] = await Promise.all([
       fetchJSON("/api/brief"),
       fetchJSON("/api/sources"),
       fetchJSON("/api/forecasts"),
       fetchJSON("/api/signals?limit=200"),
       fetchJSON("/api/health"),
+      fetchJSON("/api/performance"),
     ]);
 
     // Top bar
@@ -171,6 +276,12 @@ async function loadAll() {
     $("topMeta").innerHTML = meta;
     if (health.demo_mode) {
       $("demoBanner").hidden = false;
+    }
+    if (health.database.warnings.length) {
+      $("databaseBanner").hidden = false;
+      $("databaseBanner").textContent = `Database: ${health.database.path} — ${health.database.warnings.join(" ")}`;
+    } else {
+      $("databaseBanner").hidden = true;
     }
 
     // Brief header
@@ -201,6 +312,9 @@ async function loadAll() {
 
     // Ledger
     $("ledgerBody").innerHTML = forecasts.forecasts.length ? forecasts.forecasts.map(ledgerRow).join("") : "<tr><td colspan='9' class='empty'>No forecasts issued yet.</td></tr>";
+    document.querySelectorAll(".forecast-open").forEach(button => button.addEventListener("click", () => openForecast(button.dataset.forecastId)));
+
+    $("performanceSummary").innerHTML = renderPerformance(performance);
 
     // Source health
     $("sourcesBody").innerHTML = sources.sources.map(sourceRow).join("");

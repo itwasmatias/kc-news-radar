@@ -16,6 +16,7 @@
       <div class="brand__meta" id="topMeta"></div>
     </div>
     <div id="demoBanner" class="demo-banner" hidden>DEMO DATA — synthetic fixtures for demonstration only.</div>
+    <div id="databaseBanner" class="database-banner" hidden></div>
   </header>
 
   <nav class="tabs" role="tablist">
@@ -23,6 +24,7 @@
     <button class="tab" data-tab="emerging">Emerging Signals</button>
     <button class="tab" data-tab="next72">Next 72h</button>
     <button class="tab" data-tab="ledger">Forecast Ledger</button>
+    <button class="tab" data-tab="validation">Validation</button>
     <button class="tab" data-tab="sources">Source Health</button>
   </nav>
 
@@ -94,6 +96,14 @@
         </thead>
         <tbody id="ledgerBody"></tbody>
       </table>
+      <div id="forecastDetail" class="detail-workspace" hidden></div>
+    </section>
+
+    <!-- CLOSED-LOOP VALIDATION -->
+    <section id="validation" class="panel">
+      <div class="panel__header"><h1>Forecast performance</h1></div>
+      <p class="scientific-note">Recorded outcome counts only — not probabilities, calibration, or proof of predictive superiority.</p>
+      <div id="performanceSummary"></div>
     </section>
 
     <!-- SOURCE HEALTH -->
